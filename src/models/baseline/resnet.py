@@ -71,17 +71,45 @@ class Bottleneck(nn.Module):
         out = F.relu(out)
         return out
 
-class ClassifierCell(nn.Module):
-    def __init__(self, n_class):
-        super(ClassifierCell, self).__init__()
-        self.n_class = n_class
-        self.fc = nn.Linear(max_channel, n_class)
+class Classifier(nn.Module):
+    def __init__(self, classes_size):
+        super(Classifier, self).__init__()
+        self.classes_size = classes_size
+        self.classifier_info = self.make_classifier_info()
+        self.classifier = self.make_classifier()
         
-    def forward(self, input):
-        x = F.adaptive_avg_pool2d(input, 1).view(input.size(0),-1)
-        x = self.fc(x)
-        return x
+    def make_classifier_info(self):
+        classifier_info = [ 
+        {'input_size':512,'output_size':self.classes_size,'num_layer':1,'cell':'BasicCell','mode':'fc','normalization':'none','activation':'none','raw':False},
+        {'cell':'PoolCell','mode':'avg','output_size':1}
+        ]
+        return classifier_info
 
+    def make_classifier(self):
+        classifier = nn.ModuleList([])
+        for i in range(len(self.classifier_info)):
+            classifier.append(Cell(self.classifier_info[i]))
+        return classifier
+        
+    def classification_loss_fn(self, input, output, protocol):
+        if(protocol['loss_mode']['classification'] == 'ce'):
+            loss_fn = F.cross_entropy
+        else:
+            raise ValueError('classification loss mode not supported')
+        if(protocol['tuning_param']['classification'] > 0):
+            loss = loss_fn(output['classification'],input['label'],reduction='mean')
+            loss = loss.mean()
+        else:
+            loss = torch.tensor(0,device=device,dtype=torch.float32) 
+        return loss
+        
+    def forward(self, input, protocol):
+        x = input
+        for i in range(len(self.classifier)):
+            x = self.classifier[i](x)        
+        x = x.view(x.size(0),self.classes_size)
+        return x
+        
 class ResNet(nn.Module):
     def __init__(self, block, num_blocks, classes_size=10, if_classify = True):
         super(ResNet, self).__init__()
@@ -89,7 +117,7 @@ class ResNet(nn.Module):
         self.bn1 = nn.BatchNorm2d(64)
         
         self.layers = self.make_layers(block, num_blocks, stride)
-        self.classifier = ClassifierCell(classes_size)
+        self.classifier = Classifier(classes_size)
         self.if_classify = if_classify
         
     def make_layers(self,block,num_blocks,stride):
@@ -104,31 +132,24 @@ class ResNet(nn.Module):
             module_list.append(nn.Sequential(*layers))
         layers = nn.ModuleList(module_list)
         return layers
-
-    def classification_loss_fn(self, output, target):
-        loss = F.cross_entropy(output,target)
-        return loss
         
     def forward(self, input, protocol):
-        mode = protocol['mode']
-        depth = protocol['depth']
+        output = {'loss':torch.tensor(0,device=device,dtype=torch.float32),
+                'compression':{'img':torch.tensor(0,device=device,dtype=torch.float32),'code':[]},
+                'classification':torch.tensor(0,device=device,dtype=torch.float32)}
         if(self.if_classify):
-            output = {}
-            img = input['img']
-            label = input['label']
-            x = L_to_RGB(img) if (mode == 'L') else img
+            x = L_to_RGB(input['img']) if (protocol['mode'] == 'L') else input['img']
             x = F.relu(self.bn1(self.conv1(x)))
-            for i in range(depth):
+            for i in range(len(self.layers)):
                 x = self.layers[i](x)
-            x = self.classifier(x)
-            loss = self.classification_loss_fn(x, label)
-            output['classification'] = x
-            output['loss'] = loss
+            output['compression']['code'] = x
+            output['classification'] = self.classifier(x)
+            output['loss'] = protocol['tuning_param']['classification']*self.classifier.classification_loss_fn(input,output,protocol)
             return output
         else:
-            x = L_to_RGB(input) if (mode == 'L') else input
+            x = L_to_RGB(input) if (protocol['mode'] == 'L') else input
             x = F.relu(self.bn1(self.conv1(x)))
-            for i in range(depth):
+            for i in range(len(self.layers)):
                 x = self.layers[i](x)
             return x
 

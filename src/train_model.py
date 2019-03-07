@@ -6,6 +6,7 @@ import models
 import torch.optim as optim
 import os
 import datetime
+import argparse
 from torch import nn
 from torch.optim.lr_scheduler import MultiStepLR, ReduceLROnPlateau
 from data import *
@@ -13,12 +14,18 @@ from utils import *
 from metrics import *
 
 cudnn.benchmark = True
+parser = argparse.ArgumentParser(description='Config')
 config.init()
 for k in config.PARAM:
     exec('{0} = config.PARAM[\'{0}\']'.format(k))
-seeds = list(range(init_seed,init_seed+num_Experiments))
+    exec('parser.add_argument(\'--{0}\',default=config.PARAM[\'{0}\'], help=\'\')'.format(k))
+args = vars(parser.parse_args())
+for k in config.PARAM:
+    if(config.PARAM[k]!=args[k]):
+        exec('config.PARAM[\'{0}\'] = {1}'.format(k,args[k]))
 
 def main():
+    seeds = list(range(init_seed,init_seed+num_Experiments))
     for i in range(num_Experiments):
         print('Experiment: {}'.format(seeds[i]))
         runExperiment(seeds[i])
@@ -78,7 +85,7 @@ def train(train_loader,model,optimizer,epoch,protocol):
     for i, input in enumerate(train_loader):
         input = collate(input)
         input = dict_to_device(input,device)
-        protocol = update_protocol(input,protocol)  
+        protocol = update_train_protocol(input,protocol)  
         output = model(input,protocol)
         output['loss'] = torch.mean(output['loss']) if(world_size > 1) else output['loss']                                                                                          
         optimizer.zero_grad()
@@ -92,7 +99,7 @@ def train(train_loader,model,optimizer,epoch,protocol):
         if(i % (len(train_loader)//5) == 0):
             estimated_finish_time = str(datetime.timedelta(seconds=(len(train_loader)-i-1)*batch_time))
             print('Train Epoch: {}[({:.0f}%)]{}, Estimated Finish Time: {}'.format(
-                epoch, 100. * i / len(train_loader), meter_panel.summary(['loss','psnr','acc','batch_time']), estimated_finish_time))
+                epoch, 100. * i / len(train_loader), meter_panel.summary(['loss','batch_time'] + protocol['metric_names']), estimated_finish_time))
     return meter_panel
 
 def test(validation_loader,model,epoch,protocol,model_TAG):
@@ -103,7 +110,7 @@ def test(validation_loader,model,epoch,protocol,model_TAG):
         for i, input in enumerate(validation_loader):
             input = collate(input)
             input = dict_to_device(input,device)
-            protocol = update_protocol(input,protocol)  
+            protocol = update_test_protocol(input,protocol)  
             output = model(input,protocol)
             output['loss'] = torch.mean(output['loss']) if(world_size > 1) else output['loss']
             evaluation = meter_panel.eval(input,output,protocol)
@@ -118,9 +125,9 @@ def test(validation_loader,model,epoch,protocol,model_TAG):
 
 def make_optimizer(optimizer_name,model):
     if(optimizer_name=='Adam'):
-        optimizer = optim.Adam(model.parameters(),lr=1e-3)
+        optimizer = optim.Adam(model.parameters(),lr=lr)
     elif(optimizer_name=='SGD'):
-        optimizer = optim.SGD(model.parameters(),lr=1e-1, momentum=0.9)
+        optimizer = optim.SGD(model.parameters(),lr=lr, momentum=0.9)
     else:
         raise ValueError('Optimizer name not supported')
     return optimizer
@@ -138,20 +145,16 @@ def init_train_protocol(dataset):
     protocol = {}
     protocol['tuning_param'] = config.PARAM['tuning_param'].copy()
     protocol['metric_names'] = config.PARAM['train_metric_names'].copy()
-    protocol['topk'] = config.PARAM['topk']
     protocol['loss_mode'] = config.PARAM['loss_mode']
-    if(config.PARAM['balance']):
-        protocol['classes_counts'] = dataset.classes_counts.expand(world_size,-1).to(device)
+    protocol['jump_rate'] = config.PARAM['jump_rate']
     return protocol 
 
 def init_test_protocol(dataset):
     protocol = {}
     protocol['tuning_param'] = config.PARAM['tuning_param'].copy()
     protocol['metric_names'] = config.PARAM['test_metric_names'].copy()
-    protocol['topk'] = config.PARAM['topk']
     protocol['loss_mode'] = config.PARAM['loss_mode']
-    if(config.PARAM['balance']):
-        protocol['classes_counts'] = dataset.classes_counts.expand(world_size,-1).to(device)
+    protocol['jump_rate'] = config.PARAM['jump_rate']
     return protocol
     
 def collate(input):
@@ -159,13 +162,8 @@ def collate(input):
         input[k] = torch.stack(input[k],0)
     return input
 
-def update_protocol(input,protocol):
+def update_train_protocol(input,protocol):
     protocol['num_iter'] = config.PARAM['num_iter']
-    protocol['depth'] = config.PARAM['max_depth']
-    protocol['jump_rate'] = config.PARAM['jump_rate']
-    protocol['patch_shape'] = config.PARAM['patch_shape']
-    protocol['img_shape'] = (input['img'].size(2),input['img'].size(3))
-    protocol['step'] = config.PARAM['step']
     if(input['img'].size(1)==1):
         protocol['mode'] = 'L'
     elif(input['img'].size(1)==3):
@@ -174,6 +172,16 @@ def update_protocol(input,protocol):
         raise ValueError('Wrong number of channel')
     return protocol 
 
+def update_test_protocol(input,protocol):
+    protocol['num_iter'] = config.PARAM['num_iter']
+    if(input['img'].size(1)==1):
+        protocol['mode'] = 'L'
+    elif(input['img'].size(1)==3):
+        protocol['mode'] = 'RGB'
+    else:
+        raise ValueError('Wrong number of channel')
+    return protocol 
+   
 def print_result(epoch,train_meter_panel,test_meter_panel):
     estimated_finish_time = str(datetime.timedelta(seconds=(max_num_epochs - epoch - 1)*train_meter_panel.panel['batch_time'].sum))
     print('Test Epoch: {}{}{}, Estimated Finish Time: {}'.format(epoch,test_meter_panel.summary(['loss']+config.PARAM['test_metric_names']),train_meter_panel.summary(['batch_time']),estimated_finish_time))

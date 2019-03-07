@@ -211,4 +211,19 @@ from PIL import Image
         # input = collate(input)
         # mssim = MSSIM(input['img'],input['img'])
         # print(mssim)
-        # exit()        
+        # exit()
+
+# if __name__ == '__main__':
+    # from modules import PixelUnShuffle,PixelShuffle
+    # tensor = torch.rand(100,32,16,16,requires_grad=True)
+    # downsample = PixelUnShuffle(4)
+    # upsample = PixelShuffle(4)
+    # downsampled_tensor = downsample(tensor)
+    # upsampled_tensor = upsample(downsampled_tensor)
+    # print(tensor.size(),downsampled_tensor.size(),upsampled_tensor.size())
+    # print(torch.all(torch.eq(tensor,upsampled_tensor)))
+    # upsampled_tensor.mean().backward()
+    
+    
+    
+    

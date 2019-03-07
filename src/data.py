@@ -11,16 +11,11 @@ from torch.utils.data.dataloader import default_collate
 from torch.utils.data.sampler import SubsetRandomSampler
 from torch.utils.data.distributed import DistributedSampler
 from utils import *
-
-
-config.init()
-
 seed = 1234
 if_dist = False
 world_size = config.PARAM['world_size']
 num_workers = config.PARAM['num_workers']
 normalize = config.PARAM['normalize']
-branch = config.PARAM['branch']
 device = config.PARAM['device']
 
 def fetch_dataset(data_name):

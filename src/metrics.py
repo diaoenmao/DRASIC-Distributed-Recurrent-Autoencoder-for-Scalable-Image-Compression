@@ -9,7 +9,6 @@ from sklearn.metrics import *
 from sklearn.utils.linear_assignment_ import linear_assignment
 from sklearn.metrics import roc_curve, auc
 from utils import dict_to_device
-config.init()
 device = config.PARAM['device']
 
 def SSIM(output, target, window_size=11, MAX=1, window=None, full=False):
@@ -158,7 +157,7 @@ def ACC(output,target,topk=1):
         acc = (correct_k*(100.0 / batch_size)).item()
     return acc
     
-def cluster_ACC(output,target,topk=1):
+def Cluster_ACC(output,target,topk=1):
     with torch.no_grad():
         batch_size = target.size(0)
         pred_k = output.topk(topk, 1, True, True)[1]
@@ -342,14 +341,14 @@ class Metric(object):
             if('bpp' in metric_names):
                 evaluation['bpp'] = BPP(output['compression']['code'],input['img'])
         if(tuning_param['classification'] > 0):
-            topk=protocol['topk']
+            topk=config.PARAM['topk']
             if(self.if_save):
                 self.score = torch.cat((self.score,output['classification'].cpu()),0) if self.score is not None else output['classification'].cpu()
                 self.label = torch.cat((self.label,input['label'].cpu()),0) if self.label is not None else input['label'].cpu()
             if('acc' in metric_names):
                 evaluation['acc'] = ACC(output['classification'],input['label'],topk=topk)
             if('cluster_acc' in metric_names):
-                evaluation['cluster_acc'] = cluster_ACC(self.score,self.label,topk=topk)
+                evaluation['cluster_acc'] = Cluster_ACC(self.score,self.label,topk=topk)
             if('f1' in metric_names):
                 evaluation['f1'] = F1(self.score,self.label,topk=topk)
             if('precision' in metric_names):

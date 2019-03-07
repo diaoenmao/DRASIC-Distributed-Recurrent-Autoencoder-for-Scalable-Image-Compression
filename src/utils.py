@@ -221,6 +221,14 @@ def apply_along_dim(input, *other_input, fn, dim, m='flat', **other_kinput):
     output = torch.stack(output, dim=dim[1])
     return output
 
+def apply_fn(module,fn):
+    for n, m in module.named_children():
+        if(hasattr(m,fn)):
+            exec('m.{0}()'.format(fn))
+        if(sum(1 for _ in m.named_children())!=0):
+            exec('apply_fn(m,\'{0}\')'.format(fn))
+    return
+    
 # ===================Function===================== 
 def p_inverse(A):
     pinv = (A.t().matmul(A)).inverse().matmul(A.t())
