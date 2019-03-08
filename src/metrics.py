@@ -137,17 +137,6 @@ def BPP(code,img):
             raise ValueError('Data type not supported')
         bpp = 8*nbytes/num_pixel
     return bpp
-
-def flatten_output(output):
-    if(output['child'] is None):
-        return F.log_softmax(output['this'],1)
-    else:
-        flat_output = []
-        for i in range(len(output['child'])):
-            output_i = F.log_softmax(output['this'],1)[:,[i]]
-            flat_output.append(output_i+flatten_output(output['child'][i]))
-        flat_output = torch.cat(flat_output,1)
-    return flat_output
         
 def ACC(output,target,topk=1):  
     with torch.no_grad():
@@ -176,7 +165,7 @@ def F1(output,target):
         correct_k = pred_k.eq(target.view(-1,1).expand_as(pred_k)).sum(dim=1).byte()
         pred = pred_k[:,0]
         pred[correct_k,] = target[correct_k,]
-        f1 = f1_score(target.numpy(),pred.numpy(),average='macro')
+        f1 = f1_score(target.numpy(),pred.numpy(),average='none')
     return f1
 
 def Precision(output,target):  
@@ -185,7 +174,7 @@ def Precision(output,target):
         correct_k = pred_k.eq(target.view(-1,1).expand_as(pred_k)).sum(dim=1).byte()
         pred = pred_k[:,0]
         pred[correct_k,] = target[correct_k,]
-        precision = precision_score(target.numpy(),pred.numpy(),average='macro')
+        precision = precision_score(target.numpy(),pred.numpy(),average='none')
     return precision
 
 def Recall(output,target):  
@@ -194,7 +183,7 @@ def Recall(output,target):
         correct_k = pred_k.eq(target.view(-1,1).expand_as(pred_k)).sum(dim=1).byte()
         pred = pred_k[:,0]
         pred[correct_k,] = target[correct_k,]
-        recall = recall_score(target.numpy(),pred.numpy(),average='macro')
+        recall = recall_score(target.numpy(),pred.numpy(),average='none')
     return recall
 
 def ROC(output,target):  
@@ -213,7 +202,6 @@ def ROC(output,target):
     return roc
     
 class Meter_Panel(object):
-
     def __init__(self,meter_names):
         self.meter_names = meter_names
         self.panel = {k: Meter() for k in meter_names}
@@ -276,7 +264,6 @@ class Meter_Panel(object):
                     
                 
 class Meter(object):
-
     def __init__(self):
         self.reset()
 
@@ -327,37 +314,33 @@ class Metric(object):
         return
         
     def eval(self, input, output, protocol):
-        tuning_param = protocol['tuning_param']
-        metric_names = protocol['metric_names']
         evaluation = {}
         evaluation['loss'] = output['loss'].item()
-        if(tuning_param['compression'] > 0):
-            if('psnr' in metric_names):
+        if(protocol['tuning_param']['compression'] > 0):
+            if('psnr' in protocol['metric_names']):
                 evaluation['psnr'] = PSNR(output['compression']['img'],input['img'])
-            if('ssim' in metric_names):
+            if('ssim' in protocol['metric_names']):
                 evaluation['ssim'] = SSIM(output['compression']['img'],input['img'])
-            if('mssim' in metric_names):
+            if('mssim' in protocol['metric_names']):
                 evaluation['mssim'] = MSSIM(output['compression']['img'],input['img'])
-            if('bpp' in metric_names):
+            if('bpp' in protocol['metric_names']):
                 evaluation['bpp'] = BPP(output['compression']['code'],input['img'])
-        if(tuning_param['classification'] > 0):
+        if(protocol['tuning_param']['classification'] > 0):
             topk=config.PARAM['topk']
             if(self.if_save):
                 self.score = torch.cat((self.score,output['classification'].cpu()),0) if self.score is not None else output['classification'].cpu()
                 self.label = torch.cat((self.label,input['label'].cpu()),0) if self.label is not None else input['label'].cpu()
-            if('acc' in metric_names):
+            if('acc' in protocol['metric_names']):
                 evaluation['acc'] = ACC(output['classification'],input['label'],topk=topk)
-            if('cluster_acc' in metric_names):
-                evaluation['cluster_acc'] = Cluster_ACC(self.score,self.label,topk=topk)
-            if('f1' in metric_names):
-                evaluation['f1'] = F1(self.score,self.label,topk=topk)
-            if('precision' in metric_names):
-                evaluation['precision'] = Precision(self.score.self.label,topk=topk)
-            if('recall' in metric_names):
-                evaluation['recall'] = Recall(self.score,self.label,topk=topk)
-            if('prc' in metric_names):
-                evaluation['prc'] = PRC(self.score,self.label)
-            if('roc' in metric_names):
-                evaluation['roc'] = ROC(self.score,self.label)
+            if('cluster_acc' in protocol['metric_names']):
+                evaluation['cluster_acc'] = Cluster_ACC(self.score,self.label,topk=topk) if(protocol['activate_full']) else 0
+            if('f1' in protocol['metric_names']):
+                evaluation['f1'] = F1(self.score,self.label,topk=topk) if(protocol['activate_full']) else 0
+            if('precision' in protocol['metric_names']):
+                evaluation['precision'] = Precision(self.score.self.label,topk=topk) if(protocol['activate_full']) else 0
+            if('recall' in protocol['metric_names']):
+                evaluation['recall'] = Recall(self.score,self.label,topk=topk) if(protocol['activate_full']) else 0
+            if('roc' in protocol['metric_names']):
+                evaluation['roc'] = ROC(self.score,self.label) if(protocol['activate_full']) else {'fpr':0,'tpr':0,'roc_auc':0}
         return evaluation
    

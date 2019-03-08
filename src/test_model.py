@@ -3,22 +3,34 @@ import config
 import time
 import torch.backends.cudnn as cudnn
 import models
+import torch.optim as optim
+import os
+import datetime
+import argparse
+from torch import nn
+from torch.optim.lr_scheduler import MultiStepLR, ReduceLROnPlateau
 from data import *
 from utils import *
 from metrics import *
 
 cudnn.benchmark = True
+parser = argparse.ArgumentParser(description='Config')
 config.init()
 for k in config.PARAM:
     exec('{0} = config.PARAM[\'{0}\']'.format(k))
-seeds = list(range(init_seed,init_seed+num_Experiments))
+    exec('parser.add_argument(\'--{0}\',default=config.PARAM[\'{0}\'], help=\'\')'.format(k))
+args = vars(parser.parse_args())
+for k in config.PARAM:
+    if(config.PARAM[k]!=args[k]):
+        exec('config.PARAM[\'{0}\'] = {1}'.format(k,args[k]))
 
 def main():
+    seeds = list(range(init_seed,init_seed+num_Experiments))
     for i in range(num_Experiments):
         print('Experiment: {}'.format(seeds[i]))
         runExperiment(seeds[i])
     return
-    
+
 def runExperiment(seed):
     print(config.PARAM)
     resume_model_TAG = '{}_{}_{}'.format(seed,model_data_name,model_name) if(resume_TAG=='') else '{}_{}_{}_{}'.format(seed,model_data_name,model_name,resume_TAG)
@@ -51,8 +63,10 @@ def test(validation_loader,model,epoch,protocol,iter,model_TAG):
         end = time.time()
         for i, input in enumerate(validation_loader):
             input = collate(input)
+            input['img'] = input['img'][input['label']<config.PARAM['num_node']['E']] if(protocol['byclass']) else input['img']
+            input['label'] = input['label'][input['label']<config.PARAM['num_node']['E']] if(protocol['byclass']) else input['img']
             input = dict_to_device(input,device)
-            protocol = update_protocol(input,iter,i,len(validation_loader),protocol)
+            protocol = update_test_protocol(input,iter,i,len(validation_loader),protocol)
             output = model(input,protocol)
             output['loss'] = torch.mean(output['loss']) if(world_size > 1) else output['loss']
             output['compression']['code'] = entropy_codec.encode(output['compression']['code'],protocol)
@@ -61,18 +75,18 @@ def test(validation_loader,model,epoch,protocol,iter,model_TAG):
             meter_panel.update(evaluation,len(input['img']))
             meter_panel.update({'batch_time':batch_time})
             end = time.time()
-        save_img(input['img'],'./output/img/image.png')
-        save_img(output['compression']['img'],'./output/img/image_{}_{}_{}.png'.format(model_TAG,epoch,iter))
+        if(tuning_param['compression'] > 0):                                            
+            save_img(input['img'],'./output/img/image.png')
+            save_img(output['compression']['img'],'./output/img/image_{}_{}_{}.png'.format(model_TAG,epoch,iter))
     return meter_panel
 
 def init_test_protocol(dataset):
     protocol = {}
     protocol['tuning_param'] = config.PARAM['tuning_param'].copy()
     protocol['metric_names'] = config.PARAM['test_metric_names'].copy()
-    protocol['topk'] = config.PARAM['topk']
-    if(config.PARAM['balance']):
-        protocol['classes_counts'] = dataset.classes_counts.expand(world_size,-1).to(device)
-    protocol['loss_mode'] = {'compression':'mae','classification':'ce'}
+    protocol['loss_mode'] = config.PARAM['loss_mode']
+    protocol['node_name'] = {'E':[str(i) for i in range(config.PARAM['num_node']['E'])],'D':[str(i) for i in range(config.PARAM['num_node']['D'])]}
+    protocol['byclass'] = config.PARAM['byclass']
     return protocol
     
 def collate(input):
@@ -80,21 +94,16 @@ def collate(input):
         input[k] = torch.stack(input[k],0)
     return input
 
-def update_protocol(input,iter,i,num_batch,protocol):
+def update_test_protocol(input,iter,i,num_batch,protocol):
     protocol['num_iter'] = iter
-    protocol['depth'] = config.PARAM['max_depth']
-    protocol['jump_rate'] = config.PARAM['jump_rate']
-    protocol['patch_shape'] = config.PARAM['patch_shape']
-    protocol['img_shape'] = (input['img'].size(2),input['img'].size(3))
-    protocol['step'] = config.PARAM['step']
-    if(i == 0 and 'roc' in config.PARAM['test_metric_names']):
-        protocol['metric_names'].remove('roc') 
-    if(i == num_batch-1 and 'roc' in config.PARAM['test_metric_names']):
-        protocol['metric_names'].append('roc')
+    if(i == num_batch-1):
+        protocol['activate_full'] = True
+    else:
+        protocol['activate_full'] = False
     if(input['img'].size(1)==1):
-        protocol['mode'] = 'L'
+        protocol['img_mode'] = 'L'
     elif(input['img'].size(1)==3):
-        protocol['mode'] = 'RGB'
+        protocol['img_mode'] = 'RGB'
     else:
         raise ValueError('Wrong number of channel')
     return protocol

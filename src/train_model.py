@@ -43,7 +43,7 @@ def runExperiment(seed):
     _,test_dataset = fetch_dataset(data_name=test_data_name)
     validated_num_epochs = max_num_epochs
     valid_data_size = len(train_dataset) if(data_size==0) else data_size
-    train_loader,test_loader = split_dataset(train_dataset,test_dataset,valid_data_size,batch_size=batch_size,radomGen=randomGen)
+    train_loader,test_loader = split_dataset(train_dataset,test_dataset,valid_data_size,batch_size=batch_size,radomGen=randomGen,shuffle=False)
     print('Training data size {}, Number of Batches {}, Test data size {}'.format(valid_data_size,len(train_loader),len(test_dataset)))
     last_epoch = 0
     model = eval('models.{}.{}(classes_size=train_dataset.classes_size).to(device)'.format(model_dir,model_name))
@@ -84,8 +84,10 @@ def train(train_loader,model,optimizer,epoch,protocol):
     end = time.time()
     for i, input in enumerate(train_loader):
         input = collate(input)
+        input['img'] = input['img'][input['label']<config.PARAM['num_node']['E']] if(protocol['byclass']) else input['img']
+        input['label'] = input['label'][input['label']<config.PARAM['num_node']['E']] if(protocol['byclass']) else input['img']
         input = dict_to_device(input,device)
-        protocol = update_train_protocol(input,protocol)  
+        protocol = update_train_protocol(input,protocol)
         output = model(input,protocol)
         output['loss'] = torch.mean(output['loss']) if(world_size > 1) else output['loss']                                                                                          
         optimizer.zero_grad()
@@ -109,6 +111,8 @@ def test(validation_loader,model,epoch,protocol,model_TAG):
         end = time.time()
         for i, input in enumerate(validation_loader):
             input = collate(input)
+            input['img'] = input['img'][input['label']<config.PARAM['num_node']['E']] if(protocol['byclass']) else input['img']
+            input['label'] = input['label'][input['label']<config.PARAM['num_node']['E']] if(protocol['byclass']) else input['img']
             input = dict_to_device(input,device)
             protocol = update_test_protocol(input,protocol)  
             output = model(input,protocol)
@@ -146,15 +150,17 @@ def init_train_protocol(dataset):
     protocol['tuning_param'] = config.PARAM['tuning_param'].copy()
     protocol['metric_names'] = config.PARAM['train_metric_names'].copy()
     protocol['loss_mode'] = config.PARAM['loss_mode']
-    protocol['jump_rate'] = config.PARAM['jump_rate']
-    return protocol 
+    protocol['node_name'] = {'E':[str(i) for i in range(config.PARAM['num_node']['E'])],'D':[str(i) for i in range(config.PARAM['num_node']['D'])]}
+    protocol['byclass'] = config.PARAM['byclass']
+    return protocol
 
 def init_test_protocol(dataset):
     protocol = {}
     protocol['tuning_param'] = config.PARAM['tuning_param'].copy()
     protocol['metric_names'] = config.PARAM['test_metric_names'].copy()
     protocol['loss_mode'] = config.PARAM['loss_mode']
-    protocol['jump_rate'] = config.PARAM['jump_rate']
+    protocol['node_name'] = {'E':[str(i) for i in range(config.PARAM['num_node']['E'])],'D':[str(i) for i in range(config.PARAM['num_node']['D'])]}
+    protocol['byclass'] = config.PARAM['byclass']
     return protocol
     
 def collate(input):
@@ -165,9 +171,9 @@ def collate(input):
 def update_train_protocol(input,protocol):
     protocol['num_iter'] = config.PARAM['num_iter']
     if(input['img'].size(1)==1):
-        protocol['mode'] = 'L'
+        protocol['img_mode'] = 'L'
     elif(input['img'].size(1)==3):
-        protocol['mode'] = 'RGB'
+        protocol['img_mode'] = 'RGB'
     else:
         raise ValueError('Wrong number of channel')
     return protocol 
@@ -175,13 +181,12 @@ def update_train_protocol(input,protocol):
 def update_test_protocol(input,protocol):
     protocol['num_iter'] = config.PARAM['num_iter']
     if(input['img'].size(1)==1):
-        protocol['mode'] = 'L'
+        protocol['img_mode'] = 'L'
     elif(input['img'].size(1)==3):
-        protocol['mode'] = 'RGB'
+        protocol['img_mode'] = 'RGB'
     else:
         raise ValueError('Wrong number of channel')
-    return protocol 
-   
+    return protocol
 def print_result(epoch,train_meter_panel,test_meter_panel):
     estimated_finish_time = str(datetime.timedelta(seconds=(max_num_epochs - epoch - 1)*train_meter_panel.panel['batch_time'].sum))
     print('Test Epoch: {}{}{}, Estimated Finish Time: {}'.format(epoch,test_meter_panel.summary(['loss']+config.PARAM['test_metric_names']),train_meter_panel.summary(['batch_time']),estimated_finish_time))

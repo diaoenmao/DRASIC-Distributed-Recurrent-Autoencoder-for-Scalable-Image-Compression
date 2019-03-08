@@ -10,6 +10,7 @@ from modules import Cell, Quantizer
 device = config.PARAM['device']
 code_size = config.PARAM['code_size']
 activation = config.PARAM['activation']
+num_node = config.PARAM['num_node']
 
 class Encoder(nn.Module):
     def __init__(self):
@@ -44,16 +45,37 @@ class Encoder(nn.Module):
         return encoder_info
 
     def make_encoder(self):
-        encoder = nn.ModuleList([])
-        for i in range(len(self.encoder_info)):
-            encoder.append(Cell(self.encoder_info[i]))
+        encoder = nn.ModuleDict({})
+        for i in range(num_node['E']):
+            encoder[str(i)] = nn.ModuleList([])
+            for j in range(len(self.encoder_info)):
+                encoder[str(i)].append(Cell(self.encoder_info[j]))
         return encoder
         
-    def forward(self, input, protocol):
-        x = L_to_RGB(input) if (protocol['mode'] == 'L') else input
-        for i in range(len(self.encoder)):
-            x = self.encoder[i](x)
-        return x
+    def forward(self, input, label, protocol):
+        if(protocol['byclass']):
+            x = [None for i in range(len(protocol['node_name']['E']))]
+            output = None
+            for i in range(len(protocol['node_name']['E'])):
+                if(input[label==i].size(0)==0):
+                    continue
+                x[i] = input[label==i]
+                x[i] = L_to_RGB(x[i]) if (protocol['img_mode'] == 'L') else x[i]
+                node_name = str(protocol['node_name']['E'][i])
+                for j in range(len(self.encoder[node_name])):
+                    x[i] = self.encoder[node_name][j](x[i])
+                output = input.new_zeros(input.size(0),*x[i].size()[1:]) if(output is None) else output
+                output[label==i] = x[i]
+            output = input if(output is None) else output
+        else:
+            x = list(input.chunk(len(protocol['node_name']['E']),dim=0))
+            for i in range(len(x)):
+                x[i] = L_to_RGB(x[i]) if (protocol['img_mode'] == 'L') else x[i]
+                node_name = str(protocol['node_name']['E'][i])
+                for j in range(len(self.encoder[node_name])):
+                    x[i] = self.encoder[node_name][j](x[i])
+            output = torch.cat(x,dim=0)
+        return output
         
 class Decoder(nn.Module):
     def __init__(self):
@@ -88,16 +110,20 @@ class Decoder(nn.Module):
         return decoder_info
 
     def make_decoder(self):
-        decoder = nn.ModuleList([])
-        for i in range(len(self.decoder_info)):
-            decoder.append(Cell(self.decoder_info[i]))
+        decoder = nn.ModuleDict({})
+        for i in range(num_node['D']):
+            decoder[str(i)] = nn.ModuleList([])
+            for j in range(len(self.decoder_info)):
+                decoder[str(i)].append(Cell(self.decoder_info[j]))
         return decoder
         
     def forward(self, input, protocol):
-        x = input
-        for i in range(len(self.decoder)):
-            x = self.decoder[i](x)
-        x = RGB_to_L(x) if (protocol['mode'] == 'L') else x
+        x = list(input.chunk(len(protocol['node_name']['D']),dim=0))
+        for i in range(len(x)):
+            for j in range(len(self.decoder[protocol['node_name']['D'][i]])):
+                x[i] = self.decoder[protocol['node_name']['D'][i]][j](x[i])
+            x[i] = RGB_to_L(x[i]) if (protocol['img_mode'] == 'L') else x[i]
+        x = torch.cat(x,dim=0)
         return x
         
 class Codec(nn.Module):
@@ -177,7 +203,7 @@ class shuffle_rescodec2(nn.Module):
                 'classification':torch.tensor(0,device=device,dtype=torch.float32)}  
         
         compression_loss = torch.tensor(0,device=device,dtype=torch.float32)
-        encoded = self.codec.encoder(input['img']*2-1,protocol)
+        encoded = self.codec.encoder(input['img']*2-1,input['label'],protocol)
         output['compression']['code'] = self.codec.quantizer(encoded)
         if(protocol['tuning_param']['compression'] > 0):
             decoded = self.codec.decoder(output['compression']['code'],protocol)
