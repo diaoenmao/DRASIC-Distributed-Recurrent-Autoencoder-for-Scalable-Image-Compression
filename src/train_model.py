@@ -49,10 +49,10 @@ def runExperiment(seed):
     model = eval('models.{}.{}(classes_size=train_dataset.classes_size).to(device)'.format(model_dir,model_name))
     optimizer = make_optimizer(optimizer_name,model)
     scheduler = make_scheduler(scheduler_name,optimizer)
-    if(resume_mode == 2):
-        _,model,_,_ = resume(model,optimizer,scheduler,resume_model_TAG)       
-    elif(resume_mode == 1):
-        last_epoch,model,optimizer,scheduler = resume(model,optimizer,scheduler,resume_model_TAG)
+    if(resume_mode == 1):
+        last_epoch,model,optimizer,scheduler = resume(model,optimizer,scheduler,resume_model_TAG)      
+    elif(resume_mode == 2):
+        last_epoch,model,_,_ = resume(model,optimizer,scheduler,resume_model_TAG) 
     if(world_size > 1):
         model = torch.nn.DataParallel(model,device_ids=list(range(world_size)))
     best_pivot = 255

@@ -10,7 +10,8 @@ from modules import Cell, Quantizer
 device = config.PARAM['device']
 code_size = config.PARAM['code_size']
 activation = config.PARAM['activation']
-            
+num_node = config.PARAM['num_node']
+       
 class Encoder(nn.Module):
     def __init__(self):
         super(Encoder, self).__init__()
@@ -120,14 +121,30 @@ class Decoder(nn.Module):
                 decoder[str(i)].append(Cell(self.decoder_info[j]))
         return decoder
         
-    def forward(self, input, protocol):
-        x = list(input.chunk(len(protocol['node_name']['D']),dim=0))
-        for i in range(len(x)):
-            for j in range(len(self.decoder[protocol['node_name']['D'][i]])):
-                x[i] = self.decoder[protocol['node_name']['D'][i]][j](x[i])
-            x[i] = RGB_to_L(x[i]) if (protocol['img_mode'] == 'L') else x[i]
-        x = torch.cat(x,dim=0)
-        return x
+    def forward(self, input, label, protocol):    
+        if(protocol['byclass']):
+            x = [None for i in range(len(protocol['node_name']['D']))]
+            output = None
+            for i in range(len(protocol['node_name']['D'])):
+                if(input[label==i].size(0)==0):
+                    continue
+                x[i] = input[label==i]
+                node_name = str(protocol['node_name']['D'][i])
+                for j in range(len(self.decoder[node_name])):
+                    x[i] = self.decoder[node_name][j](x[i])
+                x[i] = RGB_to_L(x[i]) if (protocol['img_mode'] == 'L') else x[i]
+                output = input.new_zeros(input.size(0),*x[i].size()[1:]) if(output is None) else output
+                output[label==i] = x[i]
+            output = input if(output is None) else output
+        else:
+            x = list(input.chunk(len(protocol['node_name']['D']),dim=0))
+            for i in range(len(x)):
+                node_name = str(protocol['node_name']['D'][i])
+                for j in range(len(self.decoder[node_name])):
+                    x[i] = self.decoder[node_name][j](x[i])
+                x[i] = RGB_to_L(x[i]) if (protocol['img_mode'] == 'L') else x[i]
+            output = torch.cat(x,dim=0)
+        return output
         
 class Codec(nn.Module):
     def __init__(self):
@@ -219,7 +236,7 @@ class iter_shuffle_rescodec(nn.Module):
             encoded = self.codec.encoder(compression_input,input['label'],protocol)
             output['compression']['code'].append(self.codec.quantizer(encoded))
             if(protocol['tuning_param']['compression'] > 0):
-                decoded = self.codec.decoder(output['compression']['code'][i],protocol)
+                decoded = self.codec.decoder(output['compression']['code'][i],input['label'],protocol)
                 decoded = (decoded+1)/2 if(i==0) else decoded
                 compression_input = input['img']-decoded if(i==0) else compression_input-decoded
                 output['compression']['img'] = output['compression']['img'] + decoded
