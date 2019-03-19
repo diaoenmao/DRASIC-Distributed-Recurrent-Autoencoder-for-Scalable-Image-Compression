@@ -1,6 +1,8 @@
 import numpy as np
 import cv2
 import config
+import copy
+import os
 import seaborn as sns
 from PIL import Image
 from matplotlib import pyplot as plt
@@ -11,219 +13,484 @@ for k in config.PARAM:
     exec('{0} = config.PARAM[\'{0}\']'.format(k))
 seeds = list(range(init_seed,init_seed+num_Experiments))
 metric_names = config.PARAM['test_metric_names']
-
-#model_names = ['testnet_2','Joint','Joint_tod_lstm','Magick_bpg','Magick_jp2','Magick_jpg']
-#model_names = ['Joint_cor','Joint_dist_cor','Joint_dist_cor_base']
-model_names = ['Joint']
-# model_names = ['Joint','Joint_dist_2_0','Joint_dist_2_1',\
-                # 'Joint_dist_base_2_0','Joint_dist_base_2_1']
-# model_names = ['Joint','Joint_dist_4_0','Joint_dist_4_1','Joint_dist_4_2','Joint_dist_4_3',\
-                # 'Joint_dist_base_4_0','Joint_dist_base_4_1','Joint_dist_base_4_2','Joint_dist_base_4_3']
-# model_names = ['Joint','Joint_dist_8_0','Joint_dist_8_1','Joint_dist_8_2','Joint_dist_8_3','Joint_dist_8_4','Joint_dist_8_5','Joint_dist_8_6','Joint_dist_8_7',\
-                # 'Joint_dist_base_8_0','Joint_dist_base_8_1','Joint_dist_base_8_1','Joint_dist_base_8_2','Joint_dist_base_8_3','Joint_dist_base_8_4','Joint_dist_base_8_5','Joint_dist_base_8_6','Joint_dist_base_8_7']
-# model_names = ['Joint','Joint_dist_2_0','Joint_dist_2_1',\
-                # 'Joint_dist_4_0','Joint_dist_4_1','Joint_dist_4_2','Joint_dist_4_3',\
-                # 'Joint_dist_8_0','Joint_dist_8_1','Joint_dist_8_2','Joint_dist_8_3','Joint_dist_8_4','Joint_dist_8_5','Joint_dist_8_6','Joint_dist_8_7',\
-                # 'Joint_dist_base_2_0','Joint_dist_base_2_1',\
-                # 'Joint_dist_base_4_0','Joint_dist_base_4_1','Joint_dist_base_4_2','Joint_dist_base_4_3',\
-                # 'Joint_dist_base_8_0','Joint_dist_base_8_1','Joint_dist_base_8_1','Joint_dist_base_8_2','Joint_dist_base_8_3','Joint_dist_base_8_4','Joint_dist_base_8_5','Joint_dist_base_8_6','Joint_dist_base_8_7']
-# supmodel_names = ['Joint','Joint_dist_2',\
-                    # 'Joint_dist_base_2']
-# supmodel_names = ['Joint','Joint_dist_4',\
-                    # 'Joint_dist_base_4']
-supmodel_names = ['Joint','Joint_dist_8',\
-                    'Joint_dist_base_8']                    
-# supmodel_names = ['Joint','Joint_dist_2','Joint_dist_4','Joint_dist_8','Joint_dist_base_2','Joint_dist_base_4','Joint_dist_base_8']
-
-colors = sns.color_palette('Set1', n_colors=16)
-# colors = ['black','red','blue']
-#colors = ['black','darkorange','royalblue']
-# colors = ['black','gold','lightskyblue']
-#colors = ['red','darkorange','gold','blue','royalblue','lightskyblue']
-default_colors = {model_names[i]:colors[i] for i in range(len(model_names))}
-# default_colors = {supmodel_names[i]:colors[i] for i in range(len(supmodel_names))}
-
-default_linestyles = {'testnet_2':'-','Joint':'-','Joint_tod_lstm':'-',\
-                        'Magick_jpg':'-','Magick_jp2':'-','Magick_bpg':'-',\
-                        'Joint_dist_2':'-','Joint_dist_4':'-','Joint_dist_8':'-',\
-                        'Joint_dist_base_2':'--','Joint_dist_base_4':'--','Joint_dist_base_8':'--',\
-                        'Joint_cor':'-','Joint_dist_cor':'-','Joint_dist_cor_base':'-'}
-default_labels = {'testnet_2':'ResConvLSTM','Joint':'ConvLSTM','Joint_tod_lstm':'Toderici (Baseline)',\
-                    'Magick_jpg':'JPEG','Magick_jp2':'JPEG2000','Magick_bpg':'BPG',\
-                    'Joint_dist_2':'Distributed m=2','Joint_dist_4':'Distributed m=4','Joint_dist_8':'Distributed m=8',\
-                    'Joint_dist_base_2':'Separate m=2','Joint_dist_base_4':'Separate m=4','Joint_dist_base_8':'Separate m=8',\
-                    'Joint_cor':'Joint','Joint_dist_cor':'Distributed m=2','Joint_dist_cor_base':'Separate m=2'}
-                    
-                    
-                    
+fig_format = 'eps'
+plt.rc('font', family='sans-serif')
+plt.rcParams.update({'font.size': 12})
+             
 def main():
-    results = merge()
-    results = process(results)
-    show(results)
+    codec_result = process_codec_model()
+    single_result = process_single_model()
+    full_result = process_full_model()
+    half_result = process_half_model()
+    
+    plt_codec(codec_result,single_result)
+
+    plt_full_subset_mean(full_result,single_result)
+    plt_full_class_mean(full_result,single_result)
+    plt_full_subset_band(full_result,single_result)
+    plt_full_class_band(full_result,single_result)
+
+    plt_half_subset_mean(half_result,single_result)
+    plt_half_class_mean(half_result,single_result)
+    plt_half_subset_band(half_result,single_result)
+    plt_half_class_band(half_result,single_result)
     return
-
-# def merge():
-    # results = {}
-    # for i in range(len(model_names)):
-        # results[model_names[i]] = {k:[[] for jj in range(num_Experiments)] for k in metric_names}    
-        # for j in range(num_Experiments):
-            # resume_model_TAG = '{}_{}_{}'.format(seeds[j],model_data_name,model_names[i]) if(resume_TAG=='') else '{}_{}_{}_{}'.format(seeds[j],model_data_name,model_names[i],resume_TAG)
-            # model_TAG = resume_model_TAG if(special_TAG=='') else '{}_{}'.format(resume_model_TAG,special_TAG)
-            # result = load('./output/result/{}.pkl'.format(model_TAG))
-            # for n in range(len(result['result'])):
-                # for k in metric_names:
-                    # if(k in result['result'][n].panel):
-                        # results[model_names[i]][k][j].append(result['result'][n].panel[k].avg)
-        # for k in metric_names:
-            # results[model_names[i]][k] = np.array(results[model_names[i]][k]).mean(axis=0,keepdims=False)
-    # return results
-
-def merge():
-    results = {}
-    for i in range(len(model_names)):
-        results[model_names[i]] = {k:[[] for jj in range(num_Experiments)] for k in metric_names}    
-        for j in range(num_Experiments):
-            resume_model_TAG = '{}_{}_{}'.format(seeds[j],model_data_name,model_names[i]) if(resume_TAG=='') else '{}_{}_{}_{}'.format(seeds[j],model_data_name,model_names[i],resume_TAG)
-            model_TAG = resume_model_TAG if(special_TAG=='') else '{}_{}'.format(resume_model_TAG,special_TAG)
-            result = load('./output/result/{}.pkl'.format(model_TAG))
-            for n in range(len(result['result'])):
-                for k in metric_names:
-                    if(k in result['result'][n].panel):
-                        results[model_names[i]][k][j].append(result['result'][n].panel[k])
-        for k in metric_names:
-            results[model_names[i]][k] = results[model_names[i]][k][0]
-    return results
-
-def process(results):
-    for i in range(len(model_names)):
-        for k in results[model_names[i]]:
-            if(k!='bpp'):
-                yp = results[model_names[i]][k]
-                results[model_names[i]][k] = yp
-        results[model_names[i]]['bpp'] = results[model_names[i]]['bpp']
-    return results
-
-def show(results):
-    for i in range(len(metric_names)):
-        if(metric_names[i] =='bpp'):
+    
+def process_codec_model():
+    result_names = os.listdir('./output/result/')
+    codec_result = {}
+    for i in range(len(result_names)):
+        result = load('./output/result/'+result_names[i])
+        if(result_names[i].split('_')[2]!='Magick' and result_names[i].split('_')[2]!='tod'):
             continue
+        model_TAG = '_'.join(result_names[i].split('_')[1:])[:-4]
+        result_array = {'bpp':[],'psnr':[]}
+        for j in range(len(result)):
+            tmp_result = {'bpp':[],'psnr':[]}
+            for k in range(len(result[j])):
+                tmp_result['bpp'].append(result[j][k].panel['bpp'].avg)
+                tmp_result['psnr'].append(result[j][k].panel['psnr'].avg)
+            tmp_result['bpp'] = np.array(tmp_result['bpp'])
+            tmp_result['psnr'] = np.array(tmp_result['psnr'])
+            result_array['bpp'].append(tmp_result['bpp'])
+            result_array['psnr'].append(tmp_result['psnr'])
+            codec_result[model_TAG+'_{}'.format(j)] = tmp_result
+        mean_result_array = copy.deepcopy(result_array)
+        mean_result_array['bpp'] = np.mean(np.vstack(result_array['bpp']),axis=0)
+        mean_result_array['psnr'] = np.mean(np.vstack(result_array['psnr']),axis=0)
+        codec_result[model_TAG+'_mean'] = mean_result_array
+    return codec_result
+    
+def process_single_model():
+    result_names = os.listdir('./output/result/')
+    single_result = {}
+    for i in range(len(result_names)):
+        result = load('./output/result/'+result_names[i])
+        if(result_names[i].split('_')[-3]!='sin'):
+            continue
+        model_TAG = '_'.join(result_names[i].split('_')[1:])[:-4]
+        result_array = {'bpp':[],'psnr':[]}
+        for j in range(len(result)):
+            tmp_result = {'bpp':[],'psnr':[]}
+            for k in range(len(result[j])):
+                tmp_result['bpp'].append(result[j][k].panel['bpp'].avg)
+                tmp_result['psnr'].append(result[j][k].panel['psnr'].avg)
+            tmp_result['bpp'] = np.array(tmp_result['bpp'])
+            tmp_result['psnr'] = np.array(tmp_result['psnr'])
+            result_array['bpp'].append(tmp_result['bpp'])
+            result_array['psnr'].append(tmp_result['psnr'])
+            single_result[model_TAG+'_{}'.format(j)] = tmp_result
+        mean_result_array = copy.deepcopy(result_array)
+        mean_result_array['bpp'] = np.mean(np.vstack(result_array['bpp']),axis=0)
+        mean_result_array['psnr'] = np.mean(np.vstack(result_array['psnr']),axis=0)
+        single_result[model_TAG+'_mean'] = mean_result_array
+    return single_result
+    
+def process_full_model():
+    result_names = os.listdir('./output/result/')
+    full_result = {}
+    for i in range(len(result_names)):
+        result = load('./output/result/'+result_names[i])
+        if(result_names[i].split('_')[-4]!='full' or result_names[i].split('_')[-3]=='sin'):
+            continue
+        model_TAG = '_'.join(result_names[i].split('_')[1:])[:-4]
+        result_array = {'bpp':[],'psnr':[]}
+        for j in range(len(result)):
+            tmp_result = {'bpp':[],'psnr':[]}
+            for k in range(len(result[j])):
+                tmp_result['bpp'].append(result[j][k].panel['bpp'].avg)
+                tmp_result['psnr'].append(result[j][k].panel['psnr'].avg)
+            tmp_result['bpp'] = np.array(tmp_result['bpp'])
+            tmp_result['psnr'] = np.array(tmp_result['psnr'])
+            result_array['bpp'].append(tmp_result['bpp'])
+            result_array['psnr'].append(tmp_result['psnr'])
+            full_result[model_TAG+'_{}'.format(j)] = tmp_result
+        mean_result_array = copy.deepcopy(result_array)
+        mean_result_array['bpp'] = np.mean(np.vstack(result_array['bpp']),axis=0)
+        mean_result_array['psnr'] = np.mean(np.vstack(result_array['psnr']),axis=0)
+        max_result_array = copy.deepcopy(result_array)
+        max_result_array['bpp'] = np.max(np.vstack(result_array['bpp']),axis=0)
+        max_result_array['psnr'] = np.max(np.vstack(result_array['psnr']),axis=0)
+        min_result_array = copy.deepcopy(result_array)
+        min_result_array['bpp'] = np.min(np.vstack(result_array['bpp']),axis=0)
+        min_result_array['psnr'] = np.min(np.vstack(result_array['psnr']),axis=0)
+        full_result[model_TAG+'_mean'] = mean_result_array
+        full_result[model_TAG+'_max'] = max_result_array
+        full_result[model_TAG+'_min'] = min_result_array
+    return full_result
+
+def process_half_model():
+    result_names = os.listdir('./output/result/')
+    half_result = {}
+    for i in range(len(result_names)):
+        result = load('./output/result/'+result_names[i])
+        if(result_names[i].split('_')[-4]!='half' or result_names[i].split('_')[-3]=='sin'):
+            continue
+        model_TAG = '_'.join(result_names[i].split('_')[1:])[:-4]
+        result_array = {'bpp':[],'psnr':[]}
+        for j in range(len(result)):
+            tmp_result = {'bpp':[],'psnr':[]}
+            for k in range(len(result[j])):
+                tmp_result['bpp'].append(result[j][k].panel['bpp'].avg)
+                tmp_result['psnr'].append(result[j][k].panel['psnr'].avg)
+            tmp_result['bpp'] = np.array(tmp_result['bpp'])
+            tmp_result['psnr'] = np.array(tmp_result['psnr'])
+            result_array['bpp'].append(tmp_result['bpp'])
+            result_array['psnr'].append(tmp_result['psnr'])
+            half_result[model_TAG+'_{}'.format(j)] = tmp_result
+        stack_bpp = np.vstack(result_array['bpp'])
+        stack_psnr = np.vstack(result_array['psnr'])
+        full_mean_result_array = copy.deepcopy(result_array)
+        full_mean_result_array['bpp'] = np.mean(stack_bpp[:stack_bpp.shape[0]//2,:],axis=0)
+        full_mean_result_array['psnr'] = np.mean(stack_psnr[:stack_psnr.shape[0]//2,:],axis=0)
+        full_max_result_array = copy.deepcopy(result_array)
+        full_max_result_array['bpp'] = np.max(stack_bpp[:stack_bpp.shape[0]//2,:],axis=0)
+        full_max_result_array['psnr'] = np.max(stack_psnr[:stack_psnr.shape[0]//2,:],axis=0)
+        full_min_result_array = copy.deepcopy(result_array)
+        full_min_result_array['bpp'] = np.min(stack_bpp[:stack_bpp.shape[0]//2,:],axis=0)
+        full_min_result_array['psnr'] = np.min(stack_psnr[:stack_psnr.shape[0]//2,:],axis=0)
+        
+        half_mean_result_array = copy.deepcopy(result_array)
+        half_mean_result_array['bpp'] = np.mean(stack_bpp[stack_bpp.shape[0]//2:,:],axis=0)
+        half_mean_result_array['psnr'] = np.mean(stack_psnr[stack_psnr.shape[0]//2:,:],axis=0)
+        half_max_result_array = copy.deepcopy(result_array)
+        half_max_result_array['bpp'] = np.max(stack_bpp[stack_bpp.shape[0]//2:,:],axis=0)
+        half_max_result_array['psnr'] = np.max(stack_psnr[stack_psnr.shape[0]//2:,:],axis=0)
+        half_min_result_array = copy.deepcopy(result_array)
+        half_min_result_array['bpp'] = np.min(stack_bpp[stack_bpp.shape[0]//2:,:],axis=0)
+        half_min_result_array['psnr'] = np.min(stack_psnr[stack_psnr.shape[0]//2:,:],axis=0)
+        
+        half_result[model_TAG+'_mean_full'] = full_mean_result_array
+        half_result[model_TAG+'_max_full'] = full_max_result_array
+        half_result[model_TAG+'_min_full'] = full_min_result_array
+        
+        half_result[model_TAG+'_mean_half'] = half_mean_result_array
+        half_result[model_TAG+'_max_half'] = half_max_result_array
+        half_result[model_TAG+'_min_half'] = half_min_result_array
+
+    return half_result
+
+def plt_codec(codec_result,single_result):
+    head = 'MNIST_iter_shuffle_codec_'
+    colors = ['darkorange','blue','royalblue','lightskyblue']
+    model_names = ['MNIST_tod_full_sin_class_10','MNIST_Magick_bpg','MNIST_Magick_jp2','MNIST_Magick_jpg']
+    labels = ['Toderici (Baseline)','BPG','JPEG2000','JPEG']
+    plt.figure('codec')
+    x_sin = single_result[head+'full_sin_class_10_mean']['bpp']
+    y_sin = single_result[head+'full_sin_class_10_mean']['psnr']
+    plt.plot(x_sin,y_sin,color='red',linestyle='-',label='Ours',linewidth=3)
+    for j in range(len(model_names)):
+        x = codec_result[model_names[j]+'_mean']['bpp']
+        y = codec_result[model_names[j]+'_mean']['psnr']      
+        label = labels[j]
+        plt.plot(x,y,color=colors[j],linestyle='-',label=label,linewidth=3)            
+    plt.xlim(0,6)
+    plt.ylim(10,62.5)
+    plt.xlabel('BPP')
+    plt.ylabel('PSNR')
+    plt.grid()
+    plt.legend(loc='lower right')
+    makedir_exist_ok('./output/fig')
+    plt.savefig('./output/fig/codec.{}'.format(fig_format),dpi=300,bbox_inches='tight',pad_inches=0)
+    plt.close('codec')
+        
+def plt_full_subset_mean(full_result,single_result):
+    head = 'MNIST_iter_shuffle_codec_'
+    num_node = [2,4,8,10]
+    colors = ['red','gold']
+    for i in range(len(num_node)):
+        model_names = ['full_dis_subset_'+str(num_node[i]),'full_sep_subset_'+str(num_node[i])]
+        plt.figure('full_subset_mean_{}'.format(str(num_node[i])))
+        x_sin = single_result[head+'full_sin_class_10_mean']['bpp']
+        y_sin = single_result[head+'full_sin_class_10_mean']['psnr']
+        plt.plot(x_sin,y_sin,color='black',linestyle='-',label='Joint(Full) m=1',linewidth=3) 
         for j in range(len(model_names)):
-            plt.figure(j)
-            bpp = results[model_names[j]]['bpp']
-            for k in range(len(results[model_names[j]]['bpp'])):
-                # tpr = np.zeros(results[model_names[j]][metric_names[i]][k].val['tpr']['0'].shape)
-                # for kk in (results[model_names[j]][metric_names[i]][k].val['tpr']):
-                    # print(tpr.shape)
-                    # print(results[model_names[j]][metric_names[i]][k].val['tpr'][kk].shape)
-                    # tpr = tpr + results[model_names[j]][metric_names[i]][k].val['tpr'][kk]
-                # exit()
-                # tpr = tpr/10
-                # fpr = np.zeros(results[model_names[j]][metric_names[i]][k].val['fpr']['0'].shape)
-                # for kk in (results[model_names[j]][metric_names[i]][k].val['fpr']):
-                    # fpr = fpr + results[model_names[j]][metric_names[i]][k].val['fpr'][kk]
-                # fpr = fpr/10                
-                xp = results[model_names[j]][metric_names[i]][k].val['fpr']['0']
-                yp = results[model_names[j]][metric_names[i]][k].val['tpr']['0']
-                # x = np.linspace(0,0.1,100)
-                # y = np.interp(x,xp,yp)
-                x = xp
-                y = yp
-                color = 'black' if model_names[j] not in default_colors else colors[k]
-                linestyle = '-' if model_names[j] not in default_linestyles else default_linestyles[model_names[j]]
-                label = 'bpp={}'.format(bpp[k].val)
-                plt.plot(x,y,color=color,linestyle=linestyle,label=label,linewidth=2)
-            plt.xlabel('False Positive Rate',fontsize=12)
-            if(metric_names[i]=='psnr'):
-                plt.ylabel('PSNR',fontsize=12)
-            else:
-                plt.ylabel('True Positive Rate',fontsize=12)
-            plt.grid()
-            plt.legend(loc='lower right')
-            plt.show()
-    return
+            x = full_result[head+model_names[j]+'_mean']['bpp']
+            y = full_result[head+model_names[j]+'_mean']['psnr']
+            label = ''
+            list_model_names = model_names[j].split('_')            
+            label += 'Distributed' if(list_model_names[1] == 'dis') else 'Separate'
+            label += '(Full)'
+            label += ' m={}'.format(str(num_node[i]))
+            plt.plot(x,y,color=colors[j],linestyle='-',label=label,linewidth=3)            
+        plt.xlim(0,2.125)
+        plt.ylim(20,62.5)
+        plt.xlabel('BPP',fontsize=12)
+        plt.ylabel('PSNR',fontsize=12)
+        plt.grid()
+        plt.legend(loc='lower right')
+        makedir_exist_ok('./output/fig')
+        plt.savefig('./output/fig/full_subset_mean_{}.{}'.format(str(num_node[i]),fig_format),dpi=300,bbox_inches='tight',pad_inches=0)
+        plt.close('full_subset_mean_{}'.format(str(num_node[i])))
     
-# def process(results):
-    # output = {}
-    # all_results = {k:{s:[] for s in supmodel_names} for k in metric_names}   
-    # for i in range(len(model_names)):
-        # for k in metric_names:
-            # if(model_names[i][:15]=='Joint_dist_base'):
-                # all_results[k][model_names[i][:17]].append(results[model_names[i]][k])
-            # elif(model_names[i][:10]=='Joint_dist'):
-                # all_results[k][model_names[i][:12]].append(results[model_names[i]][k])
-            # elif(model_names[i][:5]=='Joint'):
-                # all_results[k][model_names[i]].append(results[model_names[i]][k])
-    # for k in metric_names:
-        # output[k] = {}
-        # for m in all_results[k]:
-            # if(m!='Joint'):
-                # all_results[k][m] = np.vstack(all_results[k][m])
-                # output[k][m+'_min'] = np.amin(all_results[k][m],axis=0)
-                # output[k][m+'_mean'] = np.mean(all_results[k][m],axis=0)
-                # output[k][m+'_max'] = np.amax(all_results[k][m],axis=0)
-            # else:
-                # output[k][m+'_mean'] = np.array(all_results[k][m]).reshape(-1)
-    # output['bpp'] = np.linspace(0.125,2,16)
-    # return output
+def plt_full_class_mean(full_result,single_result):
+    head = 'MNIST_iter_shuffle_codec_'
+    num_node = [2,4,8,10]
+    colors = ['blue','lightskyblue']
+    for i in range(len(num_node)):
+        model_names = ['full_dis_class_'+str(num_node[i]),'full_sep_class_'+str(num_node[i])]
+        plt.figure('full_class_mean_{}'.format(str(num_node[i])))
+        x_sin = single_result[head+'full_sin_class_{}_mean'.format(str(num_node[i]))]['bpp']
+        y_sin = single_result[head+'full_sin_class_{}_mean'.format(str(num_node[i]))]['psnr']
+        plt.plot(x_sin,y_sin,color='black',linestyle='-',label='Joint(Full) m=1',linewidth=3) 
+        for j in range(len(model_names)):
+            x = full_result[head+model_names[j]+'_mean']['bpp']
+            y = full_result[head+model_names[j]+'_mean']['psnr']
+            label = ''
+            list_model_names = model_names[j].split('_')            
+            label += 'Distributed' if(list_model_names[1] == 'dis') else 'Separate'
+            label += '(Full)'
+            label += ' m={}'.format(str(num_node[i]))
+            plt.plot(x,y,color=colors[j],linestyle='-',label=label,linewidth=3)
+        plt.xlim(0,2.125)
+        plt.ylim(20,62.5)
+        plt.xlabel('BPP',fontsize=12)
+        plt.ylabel('PSNR',fontsize=12)
+        plt.grid()
+        plt.legend(loc='lower right')
+        makedir_exist_ok('./output/fig')
+        plt.savefig('./output/fig/full_class_mean_{}.{}'.format(str(num_node[i]),fig_format),dpi=300,bbox_inches='tight',pad_inches=0)
+        plt.close('full_class_mean_{}'.format(str(num_node[i])))
 
-# def show(results):
-    # for i in range(len(metric_names)):
-        # if(metric_names[i] =='bpp'):
-            # continue
-        # plt.figure(i)
-        # x = results['bpp']
-        # for k in supmodel_names:
-            # y_mean = results[metric_names[i]][k+'_mean']
-            # color = 'black' if k not in default_colors else default_colors[k]
-            # linestyle = '-' if k not in default_linestyles else default_linestyles[k]
-            # label = k if k not in default_labels else default_labels[k]
-            # # if(k!='Joint'):
-                # # y_min = results[metric_names[i]][k+'_min']            
-                # # y_max = results[metric_names[i]][k+'_max']    
-                # # plt.fill_between(x,y_max,y_min,color=color,alpha=0.5,linewidth=1)
-            # plt.plot(x,y_mean,color=color,linestyle=linestyle,label=label,linewidth=3)
-        # plt.xlabel('BPP',fontsize=12)
-        # plt.ylabel('PSNR',fontsize=12)
-        # plt.grid()
-        # plt.legend(loc='lower right')
-        # plt.show()
-    # return
+def plt_half_subset_mean(half_result,single_result):
+    head = 'MNIST_iter_shuffle_codec_'
+    num_node = [2,4,8,10]
+    colors = ['red','gold']
+    for i in range(len(num_node)):
+        model_names = ['half_dis_subset_'+str(num_node[i]),'half_sep_subset_'+str(num_node[i])]
+        plt.figure('half_subset_mean_{}'.format(str(num_node[i])))
+        x_sin = single_result[head+'full_sin_class_10_mean']['bpp']
+        y_sin = single_result[head+'full_sin_class_10_mean']['psnr']
+        plt.plot(x_sin,y_sin,color='black',linestyle='-',label='Joint(Full) m=1',linewidth=3) 
+        for j in range(len(model_names)):
+            x = half_result[head+model_names[j]+'_mean_full']['bpp']
+            y = half_result[head+model_names[j]+'_mean_full']['psnr']
+            label = ''
+            list_model_names = model_names[j].split('_')            
+            label += 'Distributed' if(list_model_names[1] == 'dis') else 'Separate'
+            label += '(Full)'
+            label += ' m={}'.format(str(num_node[i]))
+            plt.plot(x,y,color=colors[j],linestyle='-',label=label,linewidth=3)
+        x_sin = single_result[head+'half_sin_class_10_mean']['bpp']
+        y_sin = single_result[head+'half_sin_class_10_mean']['psnr']
+        plt.plot(x_sin,y_sin,color='black',linestyle='--',label='Joint(Half) m=1',linewidth=3)
+        for j in range(len(model_names)):
+            x = half_result[head+model_names[j]+'_mean_half']['bpp']
+            y = half_result[head+model_names[j]+'_mean_half']['psnr']
+            label = ''
+            list_model_names = model_names[j].split('_')            
+            label += 'Distributed' if(list_model_names[1] == 'dis') else 'Separate'
+            label += '(Half)'
+            label += ' m={}'.format(str(num_node[i]))
+            plt.plot(x,y,color=colors[j],linestyle='--',label=label,linewidth=3)
+        plt.xlim(0,2.125)
+        plt.ylim(20,62.5)
+        plt.xlabel('BPP',fontsize=12)
+        plt.ylabel('PSNR',fontsize=12)
+        plt.grid()
+        plt.legend(loc='lower right')
+        makedir_exist_ok('./output/fig')
+        plt.savefig('./output/fig/half_subset_mean_{}.{}'.format(str(num_node[i]),fig_format),dpi=300,bbox_inches='tight',pad_inches=0)
+        plt.close('half_subset_mean_{}'.format(str(num_node[i])))
+        
+def plt_half_class_mean(half_result,single_result):
+    head = 'MNIST_iter_shuffle_codec_'
+    num_node = [2,4,8,10]
+    colors = ['blue','lightskyblue']
+    for i in range(len(num_node)):
+        model_names = ['half_dis_class_'+str(num_node[i]),'half_sep_class_'+str(num_node[i])]
+        plt.figure('half_class_mean_{}'.format(str(num_node[i])))
+        x_sin = single_result[head+'full_sin_class_{}_mean'.format(str(num_node[i]))]['bpp']
+        y_sin = single_result[head+'full_sin_class_{}_mean'.format(str(num_node[i]))]['psnr']
+        plt.plot(x_sin,y_sin,color='black',linestyle='-',label='Joint(Full) m=1',linewidth=3)
+        for j in range(len(model_names)):
+            x = half_result[head+model_names[j]+'_mean_full']['bpp']
+            y = half_result[head+model_names[j]+'_mean_full']['psnr']
+            label = ''
+            list_model_names = model_names[j].split('_')            
+            label += 'Distributed' if(list_model_names[1] == 'dis') else 'Separate'
+            label += '(Full)'
+            label += ' m={}'.format(str(num_node[i]))
+            plt.plot(x,y,color=colors[j],linestyle='-',label=label,linewidth=3)
+        x_sin = single_result[head+'half_sin_class_{}_mean'.format(str(num_node[i]))]['bpp']
+        y_sin = single_result[head+'half_sin_class_{}_mean'.format(str(num_node[i]))]['psnr']
+        plt.plot(x_sin,y_sin,color='black',linestyle='--',label='Joint(Half) m=1',linewidth=3)
+        for j in range(len(model_names)):
+            x = half_result[head+model_names[j]+'_mean_half']['bpp']
+            y = half_result[head+model_names[j]+'_mean_half']['psnr']
+            label = ''
+            list_model_names = model_names[j].split('_')            
+            label += 'Distributed' if(list_model_names[1] == 'dis') else 'Separate'
+            label += '(Half)'
+            label += ' m={}'.format(str(num_node[i]))
+            plt.plot(x,y,color=colors[j],linestyle='--',label=label,linewidth=3)            
+        plt.xlim(0,2.125)
+        plt.ylim(20,62.5)
+        plt.xlabel('BPP',fontsize=12)
+        plt.ylabel('PSNR',fontsize=12)
+        plt.grid()
+        plt.legend(loc='lower right')
+        makedir_exist_ok('./output/fig')
+        plt.savefig('./output/fig/half_class_mean_{}.{}'.format(str(num_node[i]),fig_format),dpi=300,bbox_inches='tight',pad_inches=0)
+        plt.close('half_class_mean_{}'.format(str(num_node[i])))
+        
+def plt_full_subset_band(full_result,single_result):
+    head = 'MNIST_iter_shuffle_codec_'
+    num_node = [2,4,8,10]
+    colors = ['red','gold']
+    for i in range(len(num_node)):
+        model_names = ['full_dis_subset_'+str(num_node[i]),'full_sep_subset_'+str(num_node[i])]
+        plt.figure('full_subset_band_{}'.format(str(num_node[i])))
+        x_sin = single_result[head+'full_sin_class_10_mean']['bpp']
+        y_sin = single_result[head+'full_sin_class_10_mean']['psnr']
+        plt.plot(x_sin,y_sin,color='black',linestyle='-',label='Joint(Full) m=1',linewidth=3) 
+        for j in range(len(model_names)):
+            x = full_result[head+model_names[j]+'_mean']['bpp']
+            y = full_result[head+model_names[j]+'_mean']['psnr']
+            y_max = full_result[head+model_names[j]+'_max']['psnr']
+            y_min = full_result[head+model_names[j]+'_min']['psnr']
+            label = ''
+            list_model_names = model_names[j].split('_')            
+            label += 'Distributed' if(list_model_names[1] == 'dis') else 'Separate'
+            label += '(Full)'
+            label += ' m={}'.format(str(num_node[i]))
+            plt.plot(x,y,color=colors[j],linestyle='-',label=label,linewidth=3)
+            plt.fill_between(x,y_max,y_min,color=colors[j],alpha=0.5,linewidth=1)
+        plt.xlim(0,2.125)
+        plt.ylim(20,62.5)
+        plt.xlabel('BPP',fontsize=12)
+        plt.ylabel('PSNR',fontsize=12)
+        plt.grid()
+        plt.legend(loc='lower right')
+        makedir_exist_ok('./output/fig')
+        plt.savefig('./output/fig/full_subset_band_{}.{}'.format(str(num_node[i]),fig_format),dpi=300,bbox_inches='tight',pad_inches=0)
+        plt.close('full_subset_band_{}'.format(str(num_node[i])))
+        
+def plt_full_class_band(full_result,single_result):
+    head = 'MNIST_iter_shuffle_codec_'
+    num_node = [2,4,8,10]
+    colors = ['blue','lightskyblue']
+    for i in range(len(num_node)):
+        model_names = ['full_dis_class_'+str(num_node[i]),'full_sep_class_'+str(num_node[i])]
+        plt.figure('full_class_band_{}'.format(str(num_node[i])))
+        x_sin = single_result[head+'full_sin_class_{}_mean'.format(str(num_node[i]))]['bpp']
+        y_sin = single_result[head+'full_sin_class_{}_mean'.format(str(num_node[i]))]['psnr']
+        plt.plot(x_sin,y_sin,color='black',linestyle='-',label='Joint(Full) m=1',linewidth=3)
+        for j in range(len(model_names)):
+            x = full_result[head+model_names[j]+'_mean']['bpp']
+            y = full_result[head+model_names[j]+'_mean']['psnr']
+            y_max = full_result[head+model_names[j]+'_max']['psnr']
+            y_min = full_result[head+model_names[j]+'_min']['psnr']
+            label = ''
+            list_model_names = model_names[j].split('_')            
+            label += 'Distributed' if(list_model_names[1] == 'dis') else 'Separate'
+            label += '(Full)'
+            label += ' m={}'.format(str(num_node[i]))
+            plt.plot(x,y,color=colors[j],linestyle='-',label=label,linewidth=3)
+            plt.fill_between(x,y_max,y_min,color=colors[j],alpha=0.5,linewidth=1)
+        plt.xlim(0,2.125)
+        plt.ylim(20,62.5)
+        plt.xlabel('BPP',fontsize=12)
+        plt.ylabel('PSNR',fontsize=12)
+        plt.grid()
+        plt.legend(loc='lower right')
+        makedir_exist_ok('./output/fig')
+        plt.savefig('./output/fig/full_class_band_{}.{}'.format(str(num_node[i]),fig_format),dpi=300,bbox_inches='tight',pad_inches=0)
+        plt.close('full_class_band_{}'.format(str(num_node[i])))
+        
+def plt_half_subset_band(half_result,single_result):
+    head = 'MNIST_iter_shuffle_codec_'
+    num_node = [2,4,8,10]
+    colors = ['red','gold']
+    for i in range(len(num_node)):
+        model_names = ['half_dis_subset_'+str(num_node[i]),'half_sep_subset_'+str(num_node[i])]
+        plt.figure('half_subset_band_{}'.format(str(num_node[i])))
+        x_sin = single_result[head+'full_sin_class_10_mean']['bpp']
+        y_sin = single_result[head+'full_sin_class_10_mean']['psnr']
+        plt.plot(x_sin,y_sin,color='black',linestyle='-',label='Joint(Full) m=1',linewidth=3) 
+        for j in range(len(model_names)):
+            x = half_result[head+model_names[j]+'_mean_full']['bpp']
+            y = half_result[head+model_names[j]+'_mean_full']['psnr']
+            y_max = half_result[head+model_names[j]+'_max_full']['psnr']
+            y_min = half_result[head+model_names[j]+'_min_full']['psnr']
+            label = ''
+            list_model_names = model_names[j].split('_')            
+            label += 'Distributed' if(list_model_names[1] == 'dis') else 'Separate'
+            label += '(Full)'
+            label += ' m={}'.format(str(num_node[i]))
+            plt.plot(x,y,color=colors[j],linestyle='-',label=label,linewidth=3)
+            plt.fill_between(x,y_max,y_min,color=colors[j],alpha=0.5,linewidth=1)
+        x_sin = single_result[head+'half_sin_class_10_mean']['bpp']
+        y_sin = single_result[head+'half_sin_class_10_mean']['psnr']
+        plt.plot(x_sin,y_sin,color='black',linestyle='--',label='Joint(Half) m=1',linewidth=3) 
+        for j in range(len(model_names)):
+            x = half_result[head+model_names[j]+'_mean_half']['bpp']
+            y = half_result[head+model_names[j]+'_mean_half']['psnr']
+            y_max = half_result[head+model_names[j]+'_max_half']['psnr']
+            y_min = half_result[head+model_names[j]+'_min_half']['psnr']
+            label = ''
+            list_model_names = model_names[j].split('_')            
+            label += 'Distributed' if(list_model_names[1] == 'dis') else 'Separate'
+            label += '(Half)'
+            label += ' m={}'.format(str(num_node[i]))
+            plt.plot(x,y,color=colors[j],linestyle='--',label=label,linewidth=3)
+            plt.fill_between(x,y_max,y_min,color=colors[j],alpha=0.5,linewidth=1)
+        plt.xlim(0,2.125)
+        plt.ylim(20,62.5)
+        plt.xlabel('BPP',fontsize=12)
+        plt.ylabel('PSNR',fontsize=12)
+        plt.grid()
+        plt.legend(loc='lower right')
+        makedir_exist_ok('./output/fig')
+        plt.savefig('./output/fig/half_subset_band_{}.{}'.format(str(num_node[i]),fig_format),dpi=300,bbox_inches='tight',pad_inches=0)
+        plt.close('half_subset_band_{}'.format(str(num_node[i])))
 
-# def process(results):
-    # for i in range(len(model_names)):
-        # xp = results[model_names[i]]['bpp']
-        # x = np.linspace(xp.min(),xp.max(),100)
-        # for k in results[model_names[i]]:
-            # if(k!='bpp'):
-                # yp = results[model_names[i]][k]
-                # print(model_names[i],k)
-                # print(xp)
-                # print(yp)
-                # results[model_names[i]][k] = np.interp(x,xp,yp)
-        # results[model_names[i]]['bpp'] = x
-    # return results
-
-# def show(results):
-    # for i in range(len(metric_names)):
-        # if(metric_names[i] =='bpp'):
-            # continue
-        # plt.figure(i)
-        # for j in range(len(model_names)):
-            # x = results[model_names[j]]['bpp']
-            # y = results[model_names[j]][metric_names[i]]
-            # color = 'black' if model_names[j] not in default_colors else default_colors[model_names[j]]
-            # linestyle = '-' if model_names[j] not in default_linestyles else default_linestyles[model_names[j]]
-            # label = model_names[j] if model_names[j] not in default_labels else default_labels[model_names[j]]
-            # plt.plot(x,y,color=color,linestyle=linestyle,label=label,linewidth=3)
-        # plt.xlabel('BPP',fontsize=12)
-        # if(metric_names[i]=='psnr'):
-            # plt.ylabel('PSNR',fontsize=12)
-        # else:
-            # plt.ylabel('Accuracy',fontsize=12)
-        # plt.grid()
-        # plt.legend(loc='lower right')
-        # plt.show()
-    # return
-    
+def plt_half_class_band(half_result,single_result):
+    head = 'MNIST_iter_shuffle_codec_'
+    num_node = [2,4,8,10]
+    colors = ['blue','lightskyblue']
+    for i in range(len(num_node)):
+        model_names = ['half_dis_class_'+str(num_node[i]),'half_sep_class_'+str(num_node[i])]
+        plt.figure('half_class_band_{}'.format(str(num_node[i])))
+        x_sin = single_result[head+'full_sin_class_{}_mean'.format(str(num_node[i]))]['bpp']
+        y_sin = single_result[head+'full_sin_class_{}_mean'.format(str(num_node[i]))]['psnr']
+        plt.plot(x_sin,y_sin,color='black',linestyle='-',label='Joint(Half) m=1',linewidth=3)
+        for j in range(len(model_names)):
+            x = half_result[head+model_names[j]+'_mean_full']['bpp']
+            y = half_result[head+model_names[j]+'_mean_full']['psnr']
+            y_max = half_result[head+model_names[j]+'_max_full']['psnr']
+            y_min = half_result[head+model_names[j]+'_min_full']['psnr']
+            label = ''
+            list_model_names = model_names[j].split('_')            
+            label += 'Distributed' if(list_model_names[1] == 'dis') else 'Separate'
+            label += '(Full)'
+            label += ' m={}'.format(str(num_node[i]))
+            plt.plot(x,y,color=colors[j],linestyle='-',label=label,linewidth=3)
+            plt.fill_between(x,y_max,y_min,color=colors[j],alpha=0.5,linewidth=1)
+        x_sin = single_result[head+'half_sin_class_{}_mean'.format(str(num_node[i]))]['bpp']
+        y_sin = single_result[head+'half_sin_class_{}_mean'.format(str(num_node[i]))]['psnr']
+        plt.plot(x_sin,y_sin,color='black',linestyle='--',label='Joint(Half) m=1',linewidth=3)
+        for j in range(len(model_names)):
+            x = half_result[head+model_names[j]+'_mean_half']['bpp']
+            y = half_result[head+model_names[j]+'_mean_half']['psnr']
+            y_max = half_result[head+model_names[j]+'_max_half']['psnr']
+            y_min = half_result[head+model_names[j]+'_min_half']['psnr']
+            label = ''
+            list_model_names = model_names[j].split('_')            
+            label += 'Distributed' if(list_model_names[1] == 'dis') else 'Separate'
+            label += '(Half)'
+            label += ' m={}'.format(str(num_node[i]))
+            plt.plot(x,y,color=colors[j],linestyle='--',label=label,linewidth=3)
+            plt.fill_between(x,y_max,y_min,color=colors[j],alpha=0.5,linewidth=1)
+        plt.xlim(0,2.125)
+        plt.ylim(20,62.5)
+        plt.xlabel('BPP',fontsize=12)
+        plt.ylabel('PSNR',fontsize=12)
+        plt.grid()
+        plt.legend(loc='lower right')
+        makedir_exist_ok('./output/fig')
+        plt.savefig('./output/fig/half_class_band_{}.{}'.format(str(num_node[i]),fig_format),dpi=300,bbox_inches='tight',pad_inches=0)
+        plt.close('half_class_band_{}'.format(str(num_node[i])))
+        
 if __name__ == "__main__":
    main()

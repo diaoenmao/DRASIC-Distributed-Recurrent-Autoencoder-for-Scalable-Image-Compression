@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import copy
 import numpy as np
 import config
 from data import extract_patches_2d, reconstruct_from_patches_2d
@@ -10,7 +11,6 @@ from modules import Cell, Quantizer
 device = config.PARAM['device']
 code_size = config.PARAM['code_size']
 activation = config.PARAM['activation']
-num_node = config.PARAM['num_node']
             
 class Encoder(nn.Module):
     def __init__(self):
@@ -43,12 +43,12 @@ class Encoder(nn.Module):
 
     def make_encoder(self):
         encoder = nn.ModuleDict({})
-        if(num_node['E']==0):
+        if(config.PARAM['num_node']['E']==0):
             encoder['0'] = nn.ModuleList([])
             for j in range(len(self.encoder_info)):
                 encoder['0'].append(Cell(self.encoder_info[j]))
         else:
-            for i in range(num_node['E']):
+            for i in range(config.PARAM['num_node']['E']):
                 encoder[str(i)] = nn.ModuleList([])
                 for j in range(len(self.encoder_info)):
                     encoder[str(i)].append(Cell(self.encoder_info[j]))
@@ -102,12 +102,12 @@ class Decoder(nn.Module):
 
     def make_decoder(self):
         decoder = nn.ModuleDict({})
-        if(num_node['D']==0):
+        if(config.PARAM['num_node']['D']==0):
             decoder['0'] = nn.ModuleList([])
             for j in range(len(self.decoder_info)):
                 decoder['0'].append(Cell(self.decoder_info[j]))
         else:
-            for i in range(num_node['D']):
+            for i in range(config.PARAM['num_node']['D']):
                 decoder[str(i)] = nn.ModuleList([])
                 for j in range(len(self.decoder_info)):
                     decoder[str(i)].append(Cell(self.decoder_info[j]))
@@ -221,45 +221,73 @@ class iter_shuffle_codec(nn.Module):
         compression_loss = torch.tensor(0,device=device,dtype=torch.float32) 
         compression_input = input['img']*2-1
         indices = torch.arange(input['img'].size(0),device=device)
-        if(protocol['byclass']):
-            protocol['split_map'] = {}
-            protocol['split_map']['E'] = [indices[input['label']==i] for i in range(len(protocol['node_name']['E']))] if(len(protocol['node_name']['E'])!=0) else [indices]
-            protocol['split_map']['D'] = [indices[input['label']==i] for i in range(len(protocol['node_name']['D']))] if(len(protocol['node_name']['D'])!=0) else [indices]
+        protocol['split_map'] = {}
+        if('activate_node' in protocol):
+            if(len(protocol['node_name']['E'])!=0 or len(protocol['node_name']['D'])!=0):
+                if(len(protocol['node_name']['E'])!=0):
+                    protocol['split_map']['E'] = [[] for i in range(len(protocol['node_name']['E']))]
+                    protocol['split_map']['E'][protocol['activate_node']] = indices
+                else:
+                    protocol['split_map']['E'] = [indices]
+                if(len(protocol['node_name']['D'])!=0):
+                    protocol['split_map']['D'] = [[] for i in range(len(protocol['node_name']['D']))]
+                    protocol['split_map']['D'][protocol['activate_node']] = indices
+                else:
+                    protocol['split_map']['D'] = [indices]
+            else:
+                protocol['split_map']['E'] = [indices]
+                protocol['split_map']['D'] = [indices]
         else:
-            protocol['split_map'] = {}
-            protocol['split_map']['E'] = list(indices.chunk(len(protocol['node_name']['E']),dim=0)) if(len(protocol['node_name']['E'])!=0) else [indices]
-            protocol['split_map']['D'] = list(indices.chunk(len(protocol['node_name']['D']),dim=0)) if(len(protocol['node_name']['D'])!=0) else [indices]
+            if(protocol['num_class']>0):
+                if(len(protocol['node_name']['E'])!=0 or len(protocol['node_name']['D'])!=0):
+                    protocol['split_map']['E'] = [indices[input['label']==i] for i in range(len(protocol['node_name']['E']))] if(len(protocol['node_name']['E'])!=0) else [indices]
+                    protocol['split_map']['D'] = [indices[input['label']==i] for i in range(len(protocol['node_name']['D']))] if(len(protocol['node_name']['D'])!=0) else [indices]
+                else:
+                    protocol['split_map']['E'] = [indices[input['label']<protocol['num_class']]]
+                    protocol['split_map']['D'] = [indices[input['label']<protocol['num_class']]]
+            else:
+                protocol['split_map'] = {}
+                protocol['split_map']['E'] = list(indices.chunk(len(protocol['node_name']['E']),dim=0)) if(len(protocol['node_name']['E'])!=0) else [indices]
+                protocol['split_map']['D'] = list(indices.chunk(len(protocol['node_name']['D']),dim=0)) if(len(protocol['node_name']['D'])!=0) else [indices]
         if(isinstance(protocol['num_iter'],int)):
             protocol['max_num_iter'] = protocol['num_iter']
             protocol['num_iter'] = [protocol['num_iter'] for i in range(len(protocol['split_map']['E']))]
         else:
-            protocol['max_num_iter'] = max(protocol['num_iter'])            
-        for i in range(protocol['max_num_iter']):
-            protocol['cur_iter'] = i
-            encoded = self.codec.encoder(compression_input,protocol)
-            output['compression']['code'].append(self.codec.quantizer(encoded))
-            if(protocol['tuning_param']['compression'] > 0):
-                decoded = self.codec.decoder(output['compression']['code'][i],protocol)
-                decoded = (decoded+1)/2 if(i==0) else decoded
-                compression_input = input['img']-decoded if(i==0) else compression_input-decoded
-                output['compression']['img'] = output['compression']['img'] + decoded
-                compression_loss = compression_loss + self.codec.compression_loss_fn(input,output,protocol)
-        compression_loss = (compression_loss.sum()/input['img'].size(0)).mean()
-        compression_loss = compression_loss/protocol['max_num_iter']
-        output['compression']['code'] = torch.stack(output['compression']['code'],dim=1)
-        apply_fn(self.codec,'free_hidden')
-        
-        classification_loss = torch.tensor(0,device=device,dtype=torch.float32)         
-        if(protocol['tuning_param']['classification'] > 0):
-            output['classification'] = torch.tensor(0,device=device)
-            for i in range(protocol['num_iter']): 
-                logit = self.classifier(output['compression']['code'][:,i],protocol)
-                output['classification'] = output['classification'] + logit
-                classification_loss = classification_loss + self.classifier.classification_loss_fn(input,output,protocol)  
-            classification_loss = classification_loss/protocol['num_iter']
-            apply_fn(self.classifier,'free_hidden')
-            
-        output['loss'] = protocol['tuning_param']['compression']*compression_loss + protocol['tuning_param']['classification']*classification_loss
+            protocol['max_num_iter'] = max(protocol['num_iter']) 
+        if(self.training):
+            for i in range(protocol['max_num_iter']):
+                protocol['cur_iter'] = i
+                encoded = self.codec.encoder(compression_input,protocol)
+                output['compression']['code'].append(self.codec.quantizer(encoded))
+                if(protocol['tuning_param']['compression'] > 0):
+                    decoded = self.codec.decoder(output['compression']['code'][i],protocol)
+                    decoded = (decoded+1)/2 if(i==0) else decoded
+                    compression_input = input['img']-decoded if(i==0) else compression_input-decoded
+                    output['compression']['img'] = output['compression']['img'] + decoded
+                    compression_loss = compression_loss + self.codec.compression_loss_fn(input,output,protocol)
+            compression_loss = (compression_loss.sum()/input['img'].size(0)).mean()
+            compression_loss = compression_loss/protocol['max_num_iter']
+            output['compression']['code'] = torch.stack(output['compression']['code'],dim=1)
+            apply_fn(self.codec,'free_hidden')   
+            output['loss'] = protocol['tuning_param']['compression']*compression_loss           
+        else:
+            output = [copy.deepcopy(output) for _ in range(protocol['max_num_iter'])]
+            for i in range(protocol['max_num_iter']):
+                protocol['cur_iter'] = i
+                encoded = self.codec.encoder(compression_input,protocol)
+                for j in range(i,protocol['max_num_iter']):
+                    output[j]['compression']['code'].append(self.codec.quantizer(encoded))
+                if(protocol['tuning_param']['compression'] > 0):
+                    decoded = self.codec.decoder(output[i]['compression']['code'][i],protocol)
+                    decoded = (decoded+1)/2 if(i==0) else decoded
+                    compression_input = input['img']-decoded if(i==0) else compression_input-decoded
+                    output[i]['compression']['img'] = output[i-1]['compression']['img'] + decoded if(i>0) else decoded
+                    output[i]['loss'] = output[i-1]['loss'] + self.codec.compression_loss_fn(input,output[i],protocol) if(i>0) else self.codec.compression_loss_fn(input,output[i],protocol)
+                    output[i]['loss'] = (output[i]['loss'].sum()/input['img'].size(0)).mean()
+            for i in range(protocol['max_num_iter']):
+                output[i]['loss'] = output[i]['loss']/protocol['max_num_iter']
+                output[i]['compression']['code'] = torch.stack(output[i]['compression']['code'],dim=1)
+            apply_fn(self.codec,'free_hidden')
         return output
     
     

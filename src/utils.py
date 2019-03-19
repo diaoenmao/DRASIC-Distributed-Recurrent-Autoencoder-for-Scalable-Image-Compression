@@ -23,7 +23,8 @@ def makedir_exist_ok(dirpath):
             pass
         else:
             raise
-            
+    return
+
 def save(input,dir,protocol = 2,mode='torch'):
     dirname = os.path.dirname(dir)
     makedir_exist_ok(dirname)

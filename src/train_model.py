@@ -76,6 +76,7 @@ def runExperiment(seed):
             if(best_pivot > test_meter_panel.panel[best_pivot_name].avg):
                 best_pivot = test_meter_panel.panel[best_pivot_name].avg
                 save(save_result,'./output/model/{}_best.pkl'.format(model_TAG))
+    print(config.PARAM)
     return
    
 def train(train_loader,model,optimizer,epoch,protocol):
@@ -84,8 +85,8 @@ def train(train_loader,model,optimizer,epoch,protocol):
     end = time.time()
     for i, input in enumerate(train_loader):
         input = collate(input)
-        input['img'] = input['img'][input['label']<config.PARAM['num_node']['E']] if(protocol['byclass']) else input['img']
-        input['label'] = input['label'][input['label']<config.PARAM['num_node']['E']] if(protocol['byclass']) else input['img']
+        input['img'] = input['img'][input['label']<protocol['num_class']] if(protocol['num_class']>0) else input['img']
+        input['label'] = input['label'][input['label']<protocol['num_class']] if(protocol['num_class']>0) else input['label']
         input = dict_to_device(input,device)
         protocol = update_train_protocol(input,protocol)
         output = model(input,protocol)
@@ -111,8 +112,8 @@ def test(validation_loader,model,epoch,protocol,model_TAG):
         end = time.time()
         for i, input in enumerate(validation_loader):
             input = collate(input)
-            input['img'] = input['img'][input['label']<config.PARAM['num_node']['E']] if(protocol['byclass']) else input['img']
-            input['label'] = input['label'][input['label']<config.PARAM['num_node']['E']] if(protocol['byclass']) else input['img']
+            input['img'] = input['img'][input['label']<protocol['num_class']] if(protocol['num_class']>0) else input['img']
+            input['label'] = input['label'][input['label']<protocol['num_class']] if(protocol['num_class']>0) else input['label']
             input = dict_to_device(input,device)
             protocol = update_test_protocol(input,protocol)  
             output = model(input,protocol)
@@ -151,7 +152,7 @@ def init_train_protocol(dataset):
     protocol['metric_names'] = config.PARAM['train_metric_names'].copy()
     protocol['loss_mode'] = config.PARAM['loss_mode']
     protocol['node_name'] = {'E':[str(i) for i in range(config.PARAM['num_node']['E'])],'D':[str(i) for i in range(config.PARAM['num_node']['D'])]}
-    protocol['byclass'] = config.PARAM['byclass']
+    protocol['num_class'] = config.PARAM['num_class']
     return protocol
 
 def init_test_protocol(dataset):
@@ -160,7 +161,7 @@ def init_test_protocol(dataset):
     protocol['metric_names'] = config.PARAM['test_metric_names'].copy()
     protocol['loss_mode'] = config.PARAM['loss_mode']
     protocol['node_name'] = {'E':[str(i) for i in range(config.PARAM['num_node']['E'])],'D':[str(i) for i in range(config.PARAM['num_node']['D'])]}
-    protocol['byclass'] = config.PARAM['byclass']
+    protocol['num_class'] = config.PARAM['num_class']
     return protocol
     
 def collate(input):
