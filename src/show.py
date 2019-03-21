@@ -13,10 +13,10 @@ for k in config.PARAM:
     exec('{0} = config.PARAM[\'{0}\']'.format(k))
 seeds = list(range(init_seed,init_seed+num_Experiments))
 metric_names = config.PARAM['test_metric_names']
-fig_format = 'eps'
+fig_format = 'png'
 plt.rc('font', family='sans-serif')
 plt.rcParams.update({'font.size': 12})
-             
+figsize = (16,9)            
 def main():
     codec_result = process_codec_model()
     single_result = process_single_model()
@@ -189,7 +189,7 @@ def plt_codec(codec_result,single_result):
     plt.xlabel('BPP')
     plt.ylabel('PSNR')
     plt.grid()
-    plt.legend(loc='lower right')
+    plt.legend(loc='lower right',fontsize=9)
     makedir_exist_ok('./output/fig')
     plt.savefig('./output/fig/codec.{}'.format(fig_format),dpi=300,bbox_inches='tight',pad_inches=0)
     plt.close('codec')
@@ -198,9 +198,10 @@ def plt_full_subset_mean(full_result,single_result):
     head = 'MNIST_iter_shuffle_codec_'
     num_node = [2,4,8,10]
     colors = ['red','gold']
+    plt.figure('full_subset_mean',figsize=figsize,dpi=300)
     for i in range(len(num_node)):
+        plt.subplot(2,2,i+1)
         model_names = ['full_dis_subset_'+str(num_node[i]),'full_sep_subset_'+str(num_node[i])]
-        plt.figure('full_subset_mean_{}'.format(str(num_node[i])))
         x_sin = single_result[head+'full_sin_class_10_mean']['bpp']
         y_sin = single_result[head+'full_sin_class_10_mean']['psnr']
         plt.plot(x_sin,y_sin,color='black',linestyle='-',label='Joint(Full) m=1',linewidth=3) 
@@ -215,21 +216,22 @@ def plt_full_subset_mean(full_result,single_result):
             plt.plot(x,y,color=colors[j],linestyle='-',label=label,linewidth=3)            
         plt.xlim(0,2.125)
         plt.ylim(20,62.5)
-        plt.xlabel('BPP',fontsize=12)
-        plt.ylabel('PSNR',fontsize=12)
+        plt.xlabel('BPP')
+        plt.ylabel('PSNR')
         plt.grid()
-        plt.legend(loc='lower right')
-        makedir_exist_ok('./output/fig')
-        plt.savefig('./output/fig/full_subset_mean_{}.{}'.format(str(num_node[i]),fig_format),dpi=300,bbox_inches='tight',pad_inches=0)
-        plt.close('full_subset_mean_{}'.format(str(num_node[i])))
+        plt.legend(loc='upper left',fontsize=9)
+    makedir_exist_ok('./output/fig')
+    plt.savefig('./output/fig/full_subset_mean.{}'.format(fig_format),bbox_inches='tight',pad_inches=0)
+    plt.close('full_subset_mean')
     
 def plt_full_class_mean(full_result,single_result):
     head = 'MNIST_iter_shuffle_codec_'
     num_node = [2,4,8,10]
     colors = ['blue','lightskyblue']
+    plt.figure('full_class_mean',figsize=figsize,dpi=300)
     for i in range(len(num_node)):
+        plt.subplot(2, 2, i+1)
         model_names = ['full_dis_class_'+str(num_node[i]),'full_sep_class_'+str(num_node[i])]
-        plt.figure('full_class_mean_{}'.format(str(num_node[i])))
         x_sin = single_result[head+'full_sin_class_{}_mean'.format(str(num_node[i]))]['bpp']
         y_sin = single_result[head+'full_sin_class_{}_mean'.format(str(num_node[i]))]['psnr']
         plt.plot(x_sin,y_sin,color='black',linestyle='-',label='Joint(Full) m=1',linewidth=3) 
@@ -244,21 +246,22 @@ def plt_full_class_mean(full_result,single_result):
             plt.plot(x,y,color=colors[j],linestyle='-',label=label,linewidth=3)
         plt.xlim(0,2.125)
         plt.ylim(20,62.5)
-        plt.xlabel('BPP',fontsize=12)
-        plt.ylabel('PSNR',fontsize=12)
+        plt.xlabel('BPP')
+        plt.ylabel('PSNR')
         plt.grid()
-        plt.legend(loc='lower right')
-        makedir_exist_ok('./output/fig')
-        plt.savefig('./output/fig/full_class_mean_{}.{}'.format(str(num_node[i]),fig_format),dpi=300,bbox_inches='tight',pad_inches=0)
-        plt.close('full_class_mean_{}'.format(str(num_node[i])))
+        plt.legend(loc='upper left',fontsize=9)
+    makedir_exist_ok('./output/fig')
+    plt.savefig('./output/fig/full_class_mean.{}'.format(fig_format),bbox_inches='tight',pad_inches=0)
+    plt.close('full_class_mean')
 
 def plt_half_subset_mean(half_result,single_result):
     head = 'MNIST_iter_shuffle_codec_'
     num_node = [2,4,8,10]
     colors = ['red','gold']
+    plt.figure('half_subset_mean',figsize=figsize,dpi=300)
     for i in range(len(num_node)):
+        plt.subplot(2,2,i+1)
         model_names = ['half_dis_subset_'+str(num_node[i]),'half_sep_subset_'+str(num_node[i])]
-        plt.figure('half_subset_mean_{}'.format(str(num_node[i])))
         x_sin = single_result[head+'full_sin_class_10_mean']['bpp']
         y_sin = single_result[head+'full_sin_class_10_mean']['psnr']
         plt.plot(x_sin,y_sin,color='black',linestyle='-',label='Joint(Full) m=1',linewidth=3) 
@@ -285,21 +288,22 @@ def plt_half_subset_mean(half_result,single_result):
             plt.plot(x,y,color=colors[j],linestyle='--',label=label,linewidth=3)
         plt.xlim(0,2.125)
         plt.ylim(20,62.5)
-        plt.xlabel('BPP',fontsize=12)
-        plt.ylabel('PSNR',fontsize=12)
+        plt.xlabel('BPP')
+        plt.ylabel('PSNR')
         plt.grid()
-        plt.legend(loc='lower right')
-        makedir_exist_ok('./output/fig')
-        plt.savefig('./output/fig/half_subset_mean_{}.{}'.format(str(num_node[i]),fig_format),dpi=300,bbox_inches='tight',pad_inches=0)
-        plt.close('half_subset_mean_{}'.format(str(num_node[i])))
+        plt.legend(loc='upper left',fontsize=9)
+    makedir_exist_ok('./output/fig')
+    plt.savefig('./output/fig/half_subset_mean.{}'.format(fig_format),bbox_inches='tight',pad_inches=0)
+    plt.close('half_subset_mean')
         
 def plt_half_class_mean(half_result,single_result):
     head = 'MNIST_iter_shuffle_codec_'
     num_node = [2,4,8,10]
     colors = ['blue','lightskyblue']
+    plt.figure('half_class_mean',figsize=figsize,dpi=300)
     for i in range(len(num_node)):
+        plt.subplot(2,2,i+1)
         model_names = ['half_dis_class_'+str(num_node[i]),'half_sep_class_'+str(num_node[i])]
-        plt.figure('half_class_mean_{}'.format(str(num_node[i])))
         x_sin = single_result[head+'full_sin_class_{}_mean'.format(str(num_node[i]))]['bpp']
         y_sin = single_result[head+'full_sin_class_{}_mean'.format(str(num_node[i]))]['psnr']
         plt.plot(x_sin,y_sin,color='black',linestyle='-',label='Joint(Full) m=1',linewidth=3)
@@ -326,21 +330,22 @@ def plt_half_class_mean(half_result,single_result):
             plt.plot(x,y,color=colors[j],linestyle='--',label=label,linewidth=3)            
         plt.xlim(0,2.125)
         plt.ylim(20,62.5)
-        plt.xlabel('BPP',fontsize=12)
-        plt.ylabel('PSNR',fontsize=12)
+        plt.xlabel('BPP')
+        plt.ylabel('PSNR')
         plt.grid()
-        plt.legend(loc='lower right')
-        makedir_exist_ok('./output/fig')
-        plt.savefig('./output/fig/half_class_mean_{}.{}'.format(str(num_node[i]),fig_format),dpi=300,bbox_inches='tight',pad_inches=0)
-        plt.close('half_class_mean_{}'.format(str(num_node[i])))
+        plt.legend(loc='upper left',fontsize=9)
+    makedir_exist_ok('./output/fig')
+    plt.savefig('./output/fig/half_class_mean.{}'.format(fig_format),bbox_inches='tight',pad_inches=0)
+    plt.close('half_class_mean')
         
 def plt_full_subset_band(full_result,single_result):
     head = 'MNIST_iter_shuffle_codec_'
     num_node = [2,4,8,10]
     colors = ['red','gold']
+    plt.figure('full_subset_band',figsize=figsize,dpi=300)
     for i in range(len(num_node)):
+        plt.subplot(2,2,i+1)
         model_names = ['full_dis_subset_'+str(num_node[i]),'full_sep_subset_'+str(num_node[i])]
-        plt.figure('full_subset_band_{}'.format(str(num_node[i])))
         x_sin = single_result[head+'full_sin_class_10_mean']['bpp']
         y_sin = single_result[head+'full_sin_class_10_mean']['psnr']
         plt.plot(x_sin,y_sin,color='black',linestyle='-',label='Joint(Full) m=1',linewidth=3) 
@@ -358,21 +363,22 @@ def plt_full_subset_band(full_result,single_result):
             plt.fill_between(x,y_max,y_min,color=colors[j],alpha=0.5,linewidth=1)
         plt.xlim(0,2.125)
         plt.ylim(20,62.5)
-        plt.xlabel('BPP',fontsize=12)
-        plt.ylabel('PSNR',fontsize=12)
+        plt.xlabel('BPP')
+        plt.ylabel('PSNR')
         plt.grid()
-        plt.legend(loc='lower right')
-        makedir_exist_ok('./output/fig')
-        plt.savefig('./output/fig/full_subset_band_{}.{}'.format(str(num_node[i]),fig_format),dpi=300,bbox_inches='tight',pad_inches=0)
-        plt.close('full_subset_band_{}'.format(str(num_node[i])))
+        plt.legend(loc='upper left',fontsize=9)
+    makedir_exist_ok('./output/fig')
+    plt.savefig('./output/fig/full_subset_band.{}'.format(fig_format),bbox_inches='tight',pad_inches=0)
+    plt.close('full_subset_band')
         
 def plt_full_class_band(full_result,single_result):
     head = 'MNIST_iter_shuffle_codec_'
     num_node = [2,4,8,10]
     colors = ['blue','lightskyblue']
+    plt.figure('full_class_band',figsize=figsize,dpi=300)
     for i in range(len(num_node)):
+        plt.subplot(2,2,i+1)
         model_names = ['full_dis_class_'+str(num_node[i]),'full_sep_class_'+str(num_node[i])]
-        plt.figure('full_class_band_{}'.format(str(num_node[i])))
         x_sin = single_result[head+'full_sin_class_{}_mean'.format(str(num_node[i]))]['bpp']
         y_sin = single_result[head+'full_sin_class_{}_mean'.format(str(num_node[i]))]['psnr']
         plt.plot(x_sin,y_sin,color='black',linestyle='-',label='Joint(Full) m=1',linewidth=3)
@@ -390,21 +396,22 @@ def plt_full_class_band(full_result,single_result):
             plt.fill_between(x,y_max,y_min,color=colors[j],alpha=0.5,linewidth=1)
         plt.xlim(0,2.125)
         plt.ylim(20,62.5)
-        plt.xlabel('BPP',fontsize=12)
-        plt.ylabel('PSNR',fontsize=12)
+        plt.xlabel('BPP')
+        plt.ylabel('PSNR')
         plt.grid()
-        plt.legend(loc='lower right')
-        makedir_exist_ok('./output/fig')
-        plt.savefig('./output/fig/full_class_band_{}.{}'.format(str(num_node[i]),fig_format),dpi=300,bbox_inches='tight',pad_inches=0)
-        plt.close('full_class_band_{}'.format(str(num_node[i])))
+        plt.legend(loc='upper left',fontsize=9)
+    makedir_exist_ok('./output/fig')
+    plt.savefig('./output/fig/full_class_band.{}'.format(fig_format),bbox_inches='tight',pad_inches=0)
+    plt.close('full_class_band')
         
 def plt_half_subset_band(half_result,single_result):
     head = 'MNIST_iter_shuffle_codec_'
     num_node = [2,4,8,10]
     colors = ['red','gold']
+    plt.figure('half_subset_band',figsize=figsize,dpi=300)
     for i in range(len(num_node)):
+        plt.subplot(2,2,i+1)
         model_names = ['half_dis_subset_'+str(num_node[i]),'half_sep_subset_'+str(num_node[i])]
-        plt.figure('half_subset_band_{}'.format(str(num_node[i])))
         x_sin = single_result[head+'full_sin_class_10_mean']['bpp']
         y_sin = single_result[head+'full_sin_class_10_mean']['psnr']
         plt.plot(x_sin,y_sin,color='black',linestyle='-',label='Joint(Full) m=1',linewidth=3) 
@@ -437,24 +444,25 @@ def plt_half_subset_band(half_result,single_result):
             plt.fill_between(x,y_max,y_min,color=colors[j],alpha=0.5,linewidth=1)
         plt.xlim(0,2.125)
         plt.ylim(20,62.5)
-        plt.xlabel('BPP',fontsize=12)
-        plt.ylabel('PSNR',fontsize=12)
+        plt.xlabel('BPP')
+        plt.ylabel('PSNR')
         plt.grid()
-        plt.legend(loc='lower right')
-        makedir_exist_ok('./output/fig')
-        plt.savefig('./output/fig/half_subset_band_{}.{}'.format(str(num_node[i]),fig_format),dpi=300,bbox_inches='tight',pad_inches=0)
-        plt.close('half_subset_band_{}'.format(str(num_node[i])))
+        plt.legend(loc='upper left',fontsize=9)
+    makedir_exist_ok('./output/fig')
+    plt.savefig('./output/fig/half_subset_band.{}'.format(fig_format),bbox_inches='tight',pad_inches=0)
+    plt.close('half_subset_band')
 
 def plt_half_class_band(half_result,single_result):
     head = 'MNIST_iter_shuffle_codec_'
     num_node = [2,4,8,10]
     colors = ['blue','lightskyblue']
+    plt.figure('half_class_band',figsize=figsize,dpi=300)
     for i in range(len(num_node)):
+        plt.subplot(2,2,i+1)
         model_names = ['half_dis_class_'+str(num_node[i]),'half_sep_class_'+str(num_node[i])]
-        plt.figure('half_class_band_{}'.format(str(num_node[i])))
         x_sin = single_result[head+'full_sin_class_{}_mean'.format(str(num_node[i]))]['bpp']
         y_sin = single_result[head+'full_sin_class_{}_mean'.format(str(num_node[i]))]['psnr']
-        plt.plot(x_sin,y_sin,color='black',linestyle='-',label='Joint(Half) m=1',linewidth=3)
+        plt.plot(x_sin,y_sin,color='black',linestyle='-',label='Joint(Full) m=1',linewidth=3)
         for j in range(len(model_names)):
             x = half_result[head+model_names[j]+'_mean_full']['bpp']
             y = half_result[head+model_names[j]+'_mean_full']['psnr']
@@ -487,10 +495,10 @@ def plt_half_class_band(half_result,single_result):
         plt.xlabel('BPP',fontsize=12)
         plt.ylabel('PSNR',fontsize=12)
         plt.grid()
-        plt.legend(loc='lower right')
-        makedir_exist_ok('./output/fig')
-        plt.savefig('./output/fig/half_class_band_{}.{}'.format(str(num_node[i]),fig_format),dpi=300,bbox_inches='tight',pad_inches=0)
-        plt.close('half_class_band_{}'.format(str(num_node[i])))
+        plt.legend(loc='upper left',fontsize=9)
+    makedir_exist_ok('./output/fig')
+    plt.savefig('./output/fig/half_class_band.{}'.format(fig_format),bbox_inches='tight',pad_inches=0)
+    plt.close('half_class_band')
         
 if __name__ == "__main__":
    main()

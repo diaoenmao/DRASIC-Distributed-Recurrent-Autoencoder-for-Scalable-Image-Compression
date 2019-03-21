@@ -27,8 +27,8 @@ for k in config.PARAM:
 
 def main():
     print(config.PARAM)
-    #resume_TAG_mode = [['full','half'],['dis','sep'],['subset','class'],['2','4','8','10']]
-    resume_TAG_mode = [['full','half'],['sin'],['class'],['2','4','8','10']]
+    resume_TAG_mode = [['full','half'],['dis','sep'],['subset','class'],['2','4','8','10']]
+    #resume_TAG_mode = [['full','half'],['sin'],['class'],['2','4','8','10']]
     resume_TAGs = list(itertools.product(*resume_TAG_mode))
     seeds = list(range(init_seed,init_seed+num_Experiments))
     result = {}
