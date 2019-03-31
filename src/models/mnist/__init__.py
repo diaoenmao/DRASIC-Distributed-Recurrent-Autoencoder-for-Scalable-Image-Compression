@@ -8,3 +8,5 @@ from .shuffle_rescodec import *
 from .iter_shuffle_rescodec import *
 from .shuffle_rescodec2 import *
 from .iter_shuffle_rescodec2 import *
+
+from .toderici import *

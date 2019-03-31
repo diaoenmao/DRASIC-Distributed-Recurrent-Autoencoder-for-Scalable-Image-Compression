@@ -9,7 +9,6 @@ from utils import RGB_to_L, L_to_RGB, apply_fn
 from modules import Cell, Quantizer
 
 device = config.PARAM['device']
-code_size = config.PARAM['code_size']
 activation = config.PARAM['activation']
             
 class Encoder(nn.Module):
@@ -37,7 +36,7 @@ class Encoder(nn.Module):
         {'cell': 'LSTMCell','num_layer':1,'in': encoder_in_info[1],'hidden':encoder_hidden_info[1],'activation':activation},
         {'cell':'ShuffleCell','mode':'down','scale_factor':2}, 
         {'cell': 'LSTMCell','num_layer':1,'in': encoder_in_info[2],'hidden':encoder_hidden_info[2],'activation':activation},
-        {'input_size':128,'output_size':code_size,'num_layer':1,'cell':'BasicCell','mode':'fc','normalization':'none','activation':'tanh','raw':False}
+        {'input_size':128,'output_size':config.PARAM['code_size'],'num_layer':1,'cell':'BasicCell','mode':'fc','normalization':'none','activation':'tanh','raw':False}
         ]
         return encoder_info
 
@@ -89,7 +88,7 @@ class Decoder(nn.Module):
         [{'input_size':128,'output_size':128,'num_layer':1,'cell':'BasicCell','mode':'pass','normalization':'none','activation':'none','raw':True}],        
         ]
         decoder_info = [
-        {'input_size':code_size,'output_size':128,'num_layer':1,'cell':'BasicCell','mode':'fc','normalization':'none','activation':activation,'raw':False},      
+        {'input_size':config.PARAM['code_size'],'output_size':128,'num_layer':1,'cell':'BasicCell','mode':'fc','normalization':'none','activation':activation,'raw':False},      
         {'cell': 'LSTMCell','num_layer':1,'in': decoder_in_info[0],'hidden':decoder_hidden_info[0],'activation':activation},
         {'cell':'ShuffleCell','mode':'up','scale_factor':2},
         {'cell': 'LSTMCell','num_layer':1,'in': decoder_in_info[1],'hidden':decoder_hidden_info[1],'activation':activation},
@@ -167,7 +166,7 @@ class Classifier(nn.Module):
         
     def make_classifier_info(self):
         classifier_in_info = [ 
-        [{'input_size':code_size,'output_size':512,'num_layer':1,'cell':'BasicCell','mode':'pass','normalization':'none','activation':'none','raw':True}],
+        [{'input_size':config.PARAM['code_size'],'output_size':512,'num_layer':1,'cell':'BasicCell','mode':'pass','normalization':'none','activation':'none','raw':True}],
         [{'input_size':512,'output_size':self.classes_size,'num_layer':1,'cell':'BasicCell','mode':'fc','normalization':'none','activation':'none','raw':True}],
         ]
         classifier_hidden_info = [
@@ -217,9 +216,7 @@ class iter_shuffle_codec(nn.Module):
         output = {'loss':torch.tensor(0,device=device,dtype=torch.float32),
                 'compression':{'img':torch.tensor(0,device=device,dtype=torch.float32),'code':[]},
                 'classification':torch.tensor(0,device=device,dtype=torch.float32)}        
-        
-        compression_loss = torch.tensor(0,device=device,dtype=torch.float32) 
-        compression_input = input['img']*2-1
+
         indices = torch.arange(input['img'].size(0),device=device)
         protocol['split_map'] = {}
         if('activate_node' in protocol):
@@ -253,7 +250,10 @@ class iter_shuffle_codec(nn.Module):
             protocol['max_num_iter'] = protocol['num_iter']
             protocol['num_iter'] = [protocol['num_iter'] for i in range(len(protocol['split_map']['E']))]
         else:
-            protocol['max_num_iter'] = max(protocol['num_iter']) 
+            protocol['max_num_iter'] = max(protocol['num_iter'])
+        
+        compression_loss = torch.tensor(0,device=device,dtype=torch.float32) 
+        compression_input = input['img']*2-1
         if(self.training):
             for i in range(protocol['max_num_iter']):
                 protocol['cur_iter'] = i

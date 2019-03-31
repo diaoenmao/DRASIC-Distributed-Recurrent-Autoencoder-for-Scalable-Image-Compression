@@ -17,13 +17,14 @@ cudnn.benchmark = True
 parser = argparse.ArgumentParser(description='Config')
 config.init()
 for k in config.PARAM:
-    exec('{0} = config.PARAM[\'{0}\']'.format(k))
     exec('parser.add_argument(\'--{0}\',default=config.PARAM[\'{0}\'], help=\'\')'.format(k))
 args = vars(parser.parse_args())
 for k in config.PARAM:
     if(config.PARAM[k]!=args[k]):
         exec('config.PARAM[\'{0}\'] = {1}'.format(k,args[k]))
-
+for k in config.PARAM:
+    exec('{0} = config.PARAM[\'{0}\']'.format(k))
+    
 def main():
     seeds = list(range(init_seed,init_seed+num_Experiments))
     for i in range(num_Experiments):
@@ -32,13 +33,31 @@ def main():
     return
         
 def runExperiment(seed):
-    print(config.PARAM)
     resume_model_TAG = '{}_{}_{}'.format(seed,model_data_name,model_name) if(resume_TAG=='') else '{}_{}_{}_{}'.format(seed,model_data_name,model_name,resume_TAG)
     model_TAG = resume_model_TAG if(special_TAG=='') else '{}_{}'.format(resume_model_TAG,special_TAG)
+    if(special_TAG!=''):
+        list_special_TAG = special_TAG.split('_')
+        if(list_special_TAG[0]=='full'):
+            config.PARAM['num_iter'] = 16
+        elif(list_special_TAG[0]=='half'):
+            config.PARAM['num_iter'] = [16]*(int(list_special_TAG[3])//2) + [8]*(int(list_special_TAG[3])//2)
+        if(list_special_TAG[1]=='dis'):
+            config.PARAM['num_node'] = {'E':int(list_special_TAG[3]),'D':0}
+        elif(list_special_TAG[1]=='sep'):
+            config.PARAM['num_node'] = {'E':int(list_special_TAG[3]),'D':int(list_special_TAG[3])}
+        elif(list_special_TAG[1]=='sin'):
+            config.PARAM['num_node'] = {'E':0,'D':0}
+        if(list_special_TAG[2]=='subset'):
+            config.PARAM['num_class'] = 0
+        elif(list_special_TAG[2]=='class'):
+            config.PARAM['num_class'] = int(list_special_TAG[3])
+        if(len(list_special_TAG)>=5):
+            config.PARAM['code_size'] = int(list_special_TAG[4])
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
     randomGen = np.random.RandomState(seed)
     
+    print(config.PARAM)
     train_dataset,_ = fetch_dataset(data_name=train_data_name)
     _,test_dataset = fetch_dataset(data_name=test_data_name)
     validated_num_epochs = max_num_epochs
@@ -64,7 +83,7 @@ def runExperiment(seed):
         test_protocol = init_test_protocol(test_dataset)
         cur_train_meter_panel = train(train_loader,model,optimizer,epoch,train_protocol)
         cur_test_meter_panel = test(test_loader,model,epoch,test_protocol,model_TAG)
-        print_result(epoch,cur_train_meter_panel,cur_test_meter_panel)
+        print_result(model_TAG,epoch,cur_train_meter_panel,cur_test_meter_panel)
         scheduler.step(cur_test_meter_panel.panel['loss'].avg)
         train_meter_panel.update(cur_train_meter_panel)
         test_meter_panel.update(cur_test_meter_panel)
@@ -188,9 +207,10 @@ def update_test_protocol(input,protocol):
     else:
         raise ValueError('Wrong number of channel')
     return protocol
-def print_result(epoch,train_meter_panel,test_meter_panel):
+
+def print_result(model_TAG,epoch,train_meter_panel,test_meter_panel):
     estimated_finish_time = str(datetime.timedelta(seconds=(max_num_epochs - epoch - 1)*train_meter_panel.panel['batch_time'].sum))
-    print('Test Epoch: {}{}{}, Estimated Finish Time: {}'.format(epoch,test_meter_panel.summary(['loss']+config.PARAM['test_metric_names']),train_meter_panel.summary(['batch_time']),estimated_finish_time))
+    print('Test Epoch({}): {}{}{}, Estimated Finish Time: {}'.format(model_TAG,epoch,test_meter_panel.summary(['loss']+config.PARAM['test_metric_names']),train_meter_panel.summary(['batch_time']),estimated_finish_time))
     return
 
 def resume(model,optimizer,scheduler,resume_model_TAG):

@@ -27,9 +27,7 @@ for k in config.PARAM:
     exec('{0} = config.PARAM[\'{0}\']'.format(k))
 
 def main():
-    print(config.PARAM)
-    resume_TAG_mode = [['full'],['sep'],['class'],['10']]
-    #resume_TAG_mode = [['full','half'],['sin'],['class'],['2','4','8','10']]
+    resume_TAG_mode = [['full_sin_class','full_dis_subset','full_dis_class','full_sep_subset','full_sep_class'],['2','4','8','10'],['8','32','64','96','128']]
     resume_TAGs = list(itertools.product(*resume_TAG_mode))
     seeds = list(range(init_seed,init_seed+num_Experiments))
     result = {}
@@ -46,16 +44,20 @@ def main():
 def runExperiment(model_TAG):
     model_TAG_list = model_TAG.split('_')
     seed = int(model_TAG_list[0])
-    if(model_TAG_list[-3]=='dis'):
-        config.PARAM['num_node'] = {'E':int(model_TAG_list[-1]),'D':0}
-    elif(model_TAG_list[-3]=='sep'):
-        config.PARAM['num_node'] = {'E':int(model_TAG_list[-1]),'D':int(model_TAG_list[-1])}
-    elif(model_TAG_list[-3]=='sin'):
+    print(model_TAG_list)
+    if(model_TAG_list[-4]=='dis'):
+        config.PARAM['num_node'] = {'E':int(model_TAG_list[-2]),'D':0}
+    elif(model_TAG_list[-4]=='sep'):
+        config.PARAM['num_node'] = {'E':int(model_TAG_list[-2]),'D':int(model_TAG_list[-2])}
+    elif(model_TAG_list[-4]=='sin'):
         config.PARAM['num_node'] = {'E':0,'D':0}
-    if(model_TAG_list[-2]=='subset'):
+    if(model_TAG_list[-3]=='subset'):
         config.PARAM['num_class'] = 0
-    elif(model_TAG_list[-2]=='class'):
-        config.PARAM['num_class'] = int(model_TAG_list[-1])
+    elif(model_TAG_list[-3]=='class'):
+        config.PARAM['num_class'] = int(model_TAG_list[-2])
+    config.PARAM['code_size'] = int(model_TAG_list[-1])
+    print(config.PARAM)
+    
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
     randomGen = np.random.RandomState(seed)
@@ -78,7 +80,7 @@ def runExperiment(model_TAG):
     
 def test(validation_loader,model,epoch,protocol,model_TAG):
     entropy_codec = models.classic.Entropy()
-    meter_panel = [Meter_Panel(protocol['metric_names']) for _ in range(protocol['num_iter'])]
+    meter_panel = Meter_Panel(protocol['metric_names'])
     with torch.no_grad():
         model.train(False)
         end = time.time()
@@ -89,18 +91,16 @@ def test(validation_loader,model,epoch,protocol,model_TAG):
             input = dict_to_device(input,device)
             protocol = update_test_protocol(input,i,len(validation_loader),protocol)
             output = model(input,protocol)
-            for j in range(protocol['max_num_iter']):
-                output[j]['loss'] = torch.mean(output[j]['loss']) if(world_size > 1) else output[j]['loss']
-                output[j]['compression']['code'] = entropy_codec.encode(output[j]['compression']['code'],protocol)
-                evaluation = meter_panel[j].eval(input,output[j],protocol)
-                batch_time = time.time() - end
-                meter_panel[j].update(evaluation,len(input['img']))
-                meter_panel[j].update({'batch_time':batch_time})
+            output['loss'] = torch.mean(output['loss']) if(world_size > 1) else output['loss']
+            output['compression']['code'] = entropy_codec.encode(output['compression']['code'],protocol)
+            evaluation = meter_panel.eval(input,output,protocol)
+            batch_time = time.time() - end
+            meter_panel.update(evaluation,len(input['img']))
+            meter_panel.update({'batch_time':batch_time})
             end = time.time()
         if(tuning_param['compression'] > 0):                                            
             save_img(input['img'],'./output/img/image.png')
-            for j in range(len(output)):
-                save_img(output[j]['compression']['img'],'./output/img/image_{}_{}_{}.png'.format(model_TAG,epoch,j))
+            save_img(output['compression']['img'],'./output/img/image_{}_{}.png'.format(model_TAG,epoch))
     return meter_panel
     
 def init_test_protocol(dataset,activate_node):
@@ -133,8 +133,7 @@ def update_test_protocol(input,i,num_batch,protocol):
     return protocol
 
 def print_result(epoch,activate_node,result):
-    for i in range(config.PARAM['num_iter']):
-        print('Test Epoch: {}({}_{}){}'.format(epoch,activate_node,i,result[i].summary(['loss']+config.PARAM['test_metric_names'])))
+    print('Test Epoch: {}({}){}'.format(epoch,activate_node,result.summary(['loss']+config.PARAM['test_metric_names'])))
     return
     
 if __name__ == "__main__":
