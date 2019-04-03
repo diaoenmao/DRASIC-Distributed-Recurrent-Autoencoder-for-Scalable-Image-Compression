@@ -135,7 +135,7 @@ def test(validation_loader,model,epoch,protocol,model_TAG):
             input['label'] = input['label'][input['label']<protocol['num_class']] if(protocol['num_class']>0) else input['label']
             input = dict_to_device(input,device)
             protocol = update_test_protocol(input,protocol)  
-            output = model(input,protocol)
+            output = model(input,protocol)[-1]
             output['loss'] = torch.mean(output['loss']) if(world_size > 1) else output['loss']
             evaluation = meter_panel.eval(input,output,protocol)
             batch_time = time.time() - end

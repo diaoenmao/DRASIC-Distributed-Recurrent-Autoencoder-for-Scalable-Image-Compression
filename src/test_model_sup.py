@@ -27,7 +27,7 @@ for k in config.PARAM:
     exec('{0} = config.PARAM[\'{0}\']'.format(k))
 
 def main():
-    resume_TAG_mode = [['full_sin_class','full_dis_subset','full_dis_class','full_sep_subset','full_sep_class'],['2','4','8','10'],['8','32','64','96','128']]
+    resume_TAG_mode = [['full'],['sin_class','dis_subset','dis_class','sep_subset','sep_class'],['2','4','8','10'],['8','32','64','96','128']]
     resume_TAGs = list(itertools.product(*resume_TAG_mode))
     seeds = list(range(init_seed,init_seed+num_Experiments))
     result = {}
@@ -55,9 +55,7 @@ def runExperiment(model_TAG):
         config.PARAM['num_class'] = 0
     elif(model_TAG_list[-3]=='class'):
         config.PARAM['num_class'] = int(model_TAG_list[-2])
-    config.PARAM['code_size'] = int(model_TAG_list[-1])
-    print(config.PARAM)
-    
+    config.PARAM['code_size'] = int(model_TAG_list[-1])    
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
     randomGen = np.random.RandomState(seed)
@@ -98,9 +96,6 @@ def test(validation_loader,model,epoch,protocol,model_TAG):
             meter_panel.update(evaluation,len(input['img']))
             meter_panel.update({'batch_time':batch_time})
             end = time.time()
-        if(tuning_param['compression'] > 0):                                            
-            save_img(input['img'],'./output/img/image.png')
-            save_img(output['compression']['img'],'./output/img/image_{}_{}.png'.format(model_TAG,epoch))
     return meter_panel
     
 def init_test_protocol(dataset,activate_node):

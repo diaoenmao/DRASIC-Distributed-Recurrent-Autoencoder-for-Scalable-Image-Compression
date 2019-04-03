@@ -7,6 +7,7 @@ import torch.optim as optim
 import os
 import datetime
 import argparse
+import itertools
 from torch import nn
 from torch.optim.lr_scheduler import MultiStepLR, ReduceLROnPlateau
 from data import *
@@ -17,24 +18,42 @@ cudnn.benchmark = True
 parser = argparse.ArgumentParser(description='Config')
 config.init()
 for k in config.PARAM:
-    exec('{0} = config.PARAM[\'{0}\']'.format(k))
     exec('parser.add_argument(\'--{0}\',default=config.PARAM[\'{0}\'], help=\'\')'.format(k))
 args = vars(parser.parse_args())
 for k in config.PARAM:
     if(config.PARAM[k]!=args[k]):
         exec('config.PARAM[\'{0}\'] = {1}'.format(k,args[k]))
+for k in config.PARAM:
+    exec('{0} = config.PARAM[\'{0}\']'.format(k))
 
 def main():
+    resume_TAG_mode = [['full','half',],['sin_class','dis_subset','dis_class','sep_subset','sep_class'],['2','4','8','10']]
+    resume_TAGs = list(itertools.product(*resume_TAG_mode))
     seeds = list(range(init_seed,init_seed+num_Experiments))
-    for i in range(num_Experiments):
-        print('Experiment: {}'.format(seeds[i]))
-        runExperiment(seeds[i])
+    result = {}
+    for i in range(len(resume_TAGs)):    
+        resume_TAG = "_".join(list(resume_TAGs[i]))
+        for j in range(num_Experiments):
+            resume_model_TAG = '{}_{}_{}'.format(seeds[j],model_data_name,model_name) if(resume_TAG=='') else '{}_{}_{}_{}'.format(seeds[j],model_data_name,model_name,resume_TAG)
+            model_TAG = resume_model_TAG if(special_TAG=='') else '{}_{}'.format(resume_model_TAG,special_TAG)
+            print('Experiment: {}'.format(model_TAG))
+            result[model_TAG] = runExperiment(model_TAG)
+            save(result[model_TAG],'./output/result/{}.pkl'.format(model_TAG))
     return
 
-def runExperiment(seed):
-    print(config.PARAM)
-    resume_model_TAG = '{}_{}_{}'.format(seed,model_data_name,model_name) if(resume_TAG=='') else '{}_{}_{}_{}'.format(seed,model_data_name,model_name,resume_TAG)
-    model_TAG = resume_model_TAG if(special_TAG=='') else '{}_{}'.format(resume_model_TAG,special_TAG)
+def runExperiment(model_TAG):
+    model_TAG_list = model_TAG.split('_')
+    seed = int(model_TAG_list[0])
+    if(model_TAG_list[-3]=='dis'):
+        config.PARAM['num_node'] = {'E':int(model_TAG_list[-1]),'D':0}
+    elif(model_TAG_list[-3]=='sep'):
+        config.PARAM['num_node'] = {'E':int(model_TAG_list[-1]),'D':int(model_TAG_list[-1])}
+    elif(model_TAG_list[-3]=='sin'):
+        config.PARAM['num_node'] = {'E':0,'D':0}
+    if(model_TAG_list[-2]=='subset'):
+        config.PARAM['num_class'] = 0
+    elif(model_TAG_list[-2]=='class'):
+        config.PARAM['num_class'] = int(model_TAG_list[-1])
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
     randomGen = np.random.RandomState(seed)
@@ -42,15 +61,18 @@ def runExperiment(seed):
     train_dataset,test_dataset = fetch_dataset(data_name=test_data_name)
     valid_data_size = len(train_dataset) if(data_size==0) else data_size
     _,test_loader = split_dataset(train_dataset,test_dataset,valid_data_size,batch_size=batch_size,radomGen=randomGen)
-    best = load('./output/model/{}_best.pkl'.format(resume_model_TAG))
+    best = load('./output/model/{}_best.pkl'.format(model_TAG))
     last_epoch = best['epoch']
     model = eval('models.{}.{}(classes_size=test_dataset.classes_size).to(device)'.format(model_dir,model_name))
     model.load_state_dict(best['model_dict'])
-    test_protocol = init_test_protocol(test_dataset)
-    result = test(test_loader,model,last_epoch,test_protocol,model_TAG)
-    print_result(last_epoch,result)
-    save({'config':config.PARAM,'epoch':last_epoch,'result':result},'./output/result/{}.pkl'.format(model_TAG))  
-    return
+    model_result = []
+    activate_node = 1 if config.PARAM['num_node']['E']==0 else config.PARAM['num_node']['E']
+    for i in range(activate_node):
+        test_protocol = init_test_protocol(test_dataset,i)
+        result = test(test_loader,model,last_epoch,test_protocol,model_TAG)
+        print_result(last_epoch,i,result)
+        model_result.append(result)
+    return model_result
     
 def test(validation_loader,model,epoch,protocol,model_TAG):
     entropy_codec = models.classic.Entropy()
@@ -73,13 +95,9 @@ def test(validation_loader,model,epoch,protocol,model_TAG):
                 meter_panel[j].update(evaluation,len(input['img']))
                 meter_panel[j].update({'batch_time':batch_time})
             end = time.time()
-        if(tuning_param['compression'] > 0):                                            
-            save_img(input['img'],'./output/img/image.png')
-            for j in range(len(output)):
-                save_img(output[j]['compression']['img'],'./output/img/image_{}_{}_{}.png'.format(model_TAG,epoch,j))
     return meter_panel
-
-def init_test_protocol(dataset):
+    
+def init_test_protocol(dataset,activate_node):
     protocol = {}
     protocol['tuning_param'] = config.PARAM['tuning_param'].copy()
     protocol['metric_names'] = config.PARAM['test_metric_names'].copy()
@@ -87,6 +105,7 @@ def init_test_protocol(dataset):
     protocol['node_name'] = {'E':[str(i) for i in range(config.PARAM['num_node']['E'])],'D':[str(i) for i in range(config.PARAM['num_node']['D'])]}
     protocol['num_class'] = config.PARAM['num_class']
     protocol['num_iter'] = config.PARAM['num_iter']
+    protocol['activate_node'] = activate_node
     return protocol
     
 def collate(input):
@@ -107,9 +126,9 @@ def update_test_protocol(input,i,num_batch,protocol):
         raise ValueError('Wrong number of channel')
     return protocol
 
-def print_result(epoch,result):
+def print_result(epoch,activate_node,result):
     for i in range(config.PARAM['num_iter']):
-        print('Test Epoch: {}({}){}'.format(epoch,i,result[i].summary(['loss']+config.PARAM['test_metric_names'])))
+        print('Test Epoch: {}({}_{}){}'.format(epoch,activate_node,i,result[i].summary(['loss']+config.PARAM['test_metric_names'])))
     return
     
 if __name__ == "__main__":

@@ -1,14 +1,15 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import copy
 import numpy as np
 import config
 from data import extract_patches_2d, reconstruct_from_patches_2d
-from utils import RGB_to_L, L_to_RGB
+from utils import RGB_to_L, L_to_RGB, apply_fn
 from modules import Cell, Quantizer
 
 device = config.PARAM['device']
-
+            
 class Encoder(nn.Module):
     def __init__(self):
         super(Encoder, self).__init__()
@@ -16,15 +17,22 @@ class Encoder(nn.Module):
         self.encoder = self.make_encoder()
         
     def make_encoder_info(self):
+        encoder_in_info = [        
+        [{'input_size':64,'output_size':256,'cell':'Conv2d','kernel_size':3,'stride':2,'padding':1,'normalization':'none','activation':'none','raw':True}],                
+        [{'input_size':256,'output_size':512,'cell':'Conv2d','kernel_size':3,'stride':2,'padding':1,'normalization':'none','activation':'none','raw':True}],
+        [{'input_size':512,'output_size':512,'cell':'Conv2d','kernel_size':3,'stride':2,'padding':1,'normalization':'none','activation':'none','raw':True}],        
+        ]
+        encoder_hidden_info = [
+        [{'input_size':256,'output_size':256,'num_layer':1,'cell':'Conv2d','mode':'fc','normalization':'none','activation':'none','raw':True}],
+        [{'input_size':512,'output_size':512,'num_layer':1,'cell':'Conv2d','mode':'fc','normalization':'none','activation':'none','raw':True}],
+        [{'input_size':512,'output_size':512,'num_layer':1,'cell':'Conv2d','mode':'fc','normalization':'none','activation':'none','raw':True}]           
+        ]
         encoder_info = [
-        {'input_size':3,'output_size':32,'num_layer':1,'cell':'BasicCell','mode':'fc','normalization':'none','activation':config.PARAM['activation'],'raw':False},
-        {'cell':'ShuffleCell','mode':'down','scale_factor':2},        
-        {'input_size':128,'output_size':128,'num_layer':1,'cell':'BasicCell','mode':'pass','normalization':'none','activation':config.PARAM['activation'],'raw':False},
-        {'cell':'ShuffleCell','mode':'down','scale_factor':2},          
-        {'input_size':512,'output_size':128,'num_layer':1,'cell':'BasicCell','mode':'pass','normalization':'none','activation':config.PARAM['activation'],'raw':False},
-        {'cell':'ShuffleCell','mode':'down','scale_factor':2},
-        {'input_size':512,'output_size':128,'num_layer':1,'cell':'BasicCell','mode':'pass','normalization':'none','activation':config.PARAM['activation'],'raw':False}, 
-        {'input_size':128,'output_size':config.PARAM['code_size'],'num_layer':1,'cell':'BasicCell','mode':'fc','normalization':'none','activation':'tanh','raw':False}        
+        {'input_size':3,'output_size':64,'cell':'Conv2d','kernel_size':3,'stride':2,'padding':1,'normalization':'none','activation':config.PARAM['activation'],'raw':False},
+        {'cell': 'LSTMCell','num_layer':1,'in': encoder_in_info[0],'hidden':encoder_hidden_info[0],'activation':config.PARAM['activation']},
+        {'cell': 'LSTMCell','num_layer':1,'in': encoder_in_info[1],'hidden':encoder_hidden_info[1],'activation':config.PARAM['activation']}, 
+        {'cell': 'LSTMCell','num_layer':1,'in': encoder_in_info[2],'hidden':encoder_hidden_info[2],'activation':config.PARAM['activation']},
+        {'input_size':512,'output_size':config.PARAM['code_size'],'num_layer':1,'cell':'BasicCell','mode':'fc','normalization':'none','activation':'tanh','raw':False}
         ]
         return encoder_info
 
@@ -65,15 +73,29 @@ class Decoder(nn.Module):
         self.decoder = self.make_decoder()
         
     def make_decoder_info(self):
+        decoder_in_info = [ 
+        [{'input_size':512,'output_size':512,'num_layer':1,'cell':'BasicCell','mode':'pass','normalization':'none','activation':'none','raw':True}],
+        [{'input_size':128,'output_size':512,'num_layer':1,'cell':'BasicCell','mode':'pass','normalization':'none','activation':'none','raw':True}],
+        [{'input_size':128,'output_size':256,'num_layer':1,'cell':'BasicCell','mode':'pass','normalization':'none','activation':'none','raw':True}],
+        [{'input_size':64,'output_size':128,'num_layer':1,'cell':'BasicCell','mode':'pass','normalization':'none','activation':'none','raw':True}],        
+        ]
+        decoder_hidden_info = [
+        [{'input_size':512,'output_size':512,'num_layer':1,'cell':'BasicCell','mode':'fc','normalization':'none','activation':'none','raw':True}],
+        [{'input_size':512,'output_size':512,'num_layer':1,'cell':'BasicCell','mode':'fc','normalization':'none','activation':'none','raw':True}], 
+        [{'input_size':256,'output_size':256,'num_layer':1,'cell':'BasicCell','mode':'pass','normalization':'none','activation':'none','raw':True}],
+        [{'input_size':128,'output_size':128,'num_layer':1,'cell':'BasicCell','mode':'pass','normalization':'none','activation':'none','raw':True}],        
+        ]
         decoder_info = [
-        {'input_size':config.PARAM['code_size'],'output_size':128,'num_layer':1,'cell':'BasicCell','mode':'fc','normalization':'none','activation':config.PARAM['activation'],'raw':False},      
-        {'input_size':128,'output_size':512,'num_layer':1,'cell':'BasicCell','mode':'pass','normalization':'none','activation':config.PARAM['activation'],'raw':False},
+        {'input_size':config.PARAM['code_size'],'output_size':512,'num_layer':1,'cell':'BasicCell','mode':'fc','normalization':'none','activation':config.PARAM['activation'],'raw':False},      
+        {'cell': 'LSTMCell','num_layer':1,'in': decoder_in_info[0],'hidden':decoder_hidden_info[0],'activation':config.PARAM['activation']},
         {'cell':'ShuffleCell','mode':'up','scale_factor':2},
-        {'input_size':128,'output_size':512,'num_layer':1,'cell':'BasicCell','mode':'pass','normalization':'none','activation':config.PARAM['activation'],'raw':False},
+        {'cell': 'LSTMCell','num_layer':1,'in': decoder_in_info[1],'hidden':decoder_hidden_info[1],'activation':config.PARAM['activation']},
         {'cell':'ShuffleCell','mode':'up','scale_factor':2},
-        {'input_size':128,'output_size':128,'num_layer':1,'cell':'BasicCell','mode':'pass','normalization':'none','activation':config.PARAM['activation'],'raw':False},
+        {'cell': 'LSTMCell','num_layer':1,'in': decoder_in_info[2],'hidden':decoder_hidden_info[2],'activation':config.PARAM['activation']},
         {'cell':'ShuffleCell','mode':'up','scale_factor':2},
-        {'input_size':32,'output_size':3,'num_layer':1,'cell':'BasicCell','mode':'fc','normalization':'none','activation':'tanh','raw':False},        
+        {'cell': 'LSTMCell','num_layer':1,'in': decoder_in_info[3],'hidden':decoder_hidden_info[3],'activation':config.PARAM['activation']},
+        {'cell':'ShuffleCell','mode':'up','scale_factor':2},
+        {'input_size':32,'output_size':3,'num_layer':1,'cell':'BasicCell','mode':'fc','normalization':'none','activation':'tanh','raw':False},
         ]
         return decoder_info
 
@@ -127,7 +149,7 @@ class Codec(nn.Module):
             loss = torch.zeros(input['img'].size(0),device=device,dtype=torch.float32)
             for i in range(len(protocol['split_map']['E'])):
                 cur_split_map = protocol['split_map']['E'][i]
-                if(input['img'][cur_split_map].size(0)==0):
+                if(input['img'][cur_split_map].size(0)==0 or protocol['cur_iter']>=protocol['num_iter'][i]):
                     continue
                 loss[cur_split_map] = loss[cur_split_map] +\
                     loss_fn(output['compression']['img'][cur_split_map],input['img'][cur_split_map],reduction='none').view(input['img'][cur_split_map].size(0),-1).mean(dim=1)                        
@@ -183,9 +205,9 @@ class Classifier(nn.Module):
         x = x.view(x.size(0),self.classes_size)
         return x
         
-class shuffle_codec(nn.Module):
+class tod(nn.Module):
     def __init__(self,classes_size):
-        super(shuffle_codec, self).__init__()
+        super(tod, self).__init__()
         self.classes_size = classes_size
         self.codec = Codec()
         self.classifier = Classifier(classes_size)
@@ -193,8 +215,8 @@ class shuffle_codec(nn.Module):
     def forward(self, input, protocol):
         output = {'loss':torch.tensor(0,device=device,dtype=torch.float32),
                 'compression':{'img':torch.tensor(0,device=device,dtype=torch.float32),'code':[]},
-                'classification':torch.tensor(0,device=device,dtype=torch.float32)}  
-        
+                'classification':torch.tensor(0,device=device,dtype=torch.float32)}        
+
         indices = torch.arange(input['img'].size(0),device=device)
         protocol['split_map'] = {}
         if('activate_node' in protocol):
@@ -224,26 +246,48 @@ class shuffle_codec(nn.Module):
                 protocol['split_map'] = {}
                 protocol['split_map']['E'] = list(indices.chunk(len(protocol['node_name']['E']),dim=0)) if(len(protocol['node_name']['E'])!=0) else [indices]
                 protocol['split_map']['D'] = list(indices.chunk(len(protocol['node_name']['D']),dim=0)) if(len(protocol['node_name']['D'])!=0) else [indices]
-
+        if(isinstance(protocol['num_iter'],int)):
+            protocol['max_num_iter'] = protocol['num_iter']
+            protocol['num_iter'] = [protocol['num_iter'] for i in range(len(protocol['split_map']['E']))]
+        else:
+            protocol['max_num_iter'] = max(protocol['num_iter'])
+        
         compression_loss = torch.tensor(0,device=device,dtype=torch.float32) 
         compression_input = input['img']*2-1
-        encoded = self.codec.encoder(compression_input,protocol)
-        output['compression']['code'] = self.codec.quantizer(encoded)
-        if(protocol['tuning_param']['compression'] > 0):
-            decoded = self.codec.decoder(output['compression']['code'],protocol)
-            decoded = (decoded+1)/2
-            output['compression']['img'] = decoded
-            compression_loss = self.codec.compression_loss_fn(input,output,protocol)
-            compression_loss = (compression_loss.sum()/input['img'].size(0)).mean()            
-            output['loss'] += protocol['tuning_param']['compression']*compression_loss
-            
-        classification_loss = torch.tensor(0,device=device,dtype=torch.float32)        
-        if(protocol['tuning_param']['classification'] > 0):
-            logit = self.classifier(output['compression']['code'],protocol)
-            output['classification'] = logit
-            classification_loss = self.classifier.classification_loss_fn(input,output,protocol) 
-            output['loss'] += protocol['tuning_param']['classification']*classification_loss
-
-        return output          
+        if(self.training):
+            for i in range(protocol['max_num_iter']):
+                protocol['cur_iter'] = i
+                encoded = self.codec.encoder(compression_input,protocol)
+                output['compression']['code'].append(self.codec.quantizer(encoded))
+                if(protocol['tuning_param']['compression'] > 0):
+                    decoded = self.codec.decoder(output['compression']['code'][i],protocol)
+                    decoded = (decoded+1)/2 if(i==0) else decoded
+                    compression_input = input['img']-decoded if(i==0) else compression_input-decoded
+                    output['compression']['img'] = output['compression']['img'] + decoded
+                    compression_loss = compression_loss + self.codec.compression_loss_fn(input,output,protocol)
+            compression_loss = (compression_loss.sum()/input['img'].size(0)).mean()
+            compression_loss = compression_loss/protocol['max_num_iter']
+            output['compression']['code'] = torch.stack(output['compression']['code'],dim=1)
+            apply_fn(self.codec,'free_hidden')   
+            output['loss'] = protocol['tuning_param']['compression']*compression_loss           
+        else:
+            output = [copy.deepcopy(output) for _ in range(protocol['max_num_iter'])]
+            for i in range(protocol['max_num_iter']):
+                protocol['cur_iter'] = i
+                encoded = self.codec.encoder(compression_input,protocol)
+                for j in range(i,protocol['max_num_iter']):
+                    output[j]['compression']['code'].append(self.codec.quantizer(encoded))
+                if(protocol['tuning_param']['compression'] > 0):
+                    decoded = self.codec.decoder(output[i]['compression']['code'][i],protocol)
+                    decoded = (decoded+1)/2 if(i==0) else decoded
+                    compression_input = input['img']-decoded if(i==0) else compression_input-decoded
+                    output[i]['compression']['img'] = output[i-1]['compression']['img'] + decoded if(i>0) else decoded
+                    output[i]['loss'] = output[i-1]['loss'] + self.codec.compression_loss_fn(input,output[i],protocol) if(i>0) else self.codec.compression_loss_fn(input,output[i],protocol)
+                    output[i]['loss'] = (output[i]['loss'].sum()/input['img'].size(0)).mean()
+            for i in range(protocol['max_num_iter']):
+                output[i]['loss'] = output[i]['loss']/protocol['max_num_iter']
+                output[i]['compression']['code'] = torch.stack(output[i]['compression']['code'],dim=1)
+            apply_fn(self.codec,'free_hidden')
+        return output    
     
     

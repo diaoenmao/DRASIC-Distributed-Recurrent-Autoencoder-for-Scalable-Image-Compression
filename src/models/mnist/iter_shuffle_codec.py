@@ -9,7 +9,6 @@ from utils import RGB_to_L, L_to_RGB, apply_fn
 from modules import Cell, Quantizer
 
 device = config.PARAM['device']
-activation = config.PARAM['activation']
             
 class Encoder(nn.Module):
     def __init__(self):
@@ -29,13 +28,13 @@ class Encoder(nn.Module):
         [{'input_size':128,'output_size':128,'num_layer':1,'cell':'BasicCell','mode':'pass','normalization':'none','activation':'none','raw':True}]           
         ]
         encoder_info = [
-        {'input_size':3,'output_size':32,'num_layer':1,'cell':'BasicCell','mode':'fc','normalization':'none','activation':activation,'raw':False},
+        {'input_size':3,'output_size':32,'num_layer':1,'cell':'BasicCell','mode':'fc','normalization':'none','activation':config.PARAM['activation'],'raw':False},
         {'cell':'ShuffleCell','mode':'down','scale_factor':2}, 
-        {'cell': 'LSTMCell','num_layer':1,'in': encoder_in_info[0],'hidden':encoder_hidden_info[0],'activation':activation},
+        {'cell': 'LSTMCell','num_layer':1,'in': encoder_in_info[0],'hidden':encoder_hidden_info[0],'activation':config.PARAM['activation']},
         {'cell':'ShuffleCell','mode':'down','scale_factor':2}, 
-        {'cell': 'LSTMCell','num_layer':1,'in': encoder_in_info[1],'hidden':encoder_hidden_info[1],'activation':activation},
+        {'cell': 'LSTMCell','num_layer':1,'in': encoder_in_info[1],'hidden':encoder_hidden_info[1],'activation':config.PARAM['activation']},
         {'cell':'ShuffleCell','mode':'down','scale_factor':2}, 
-        {'cell': 'LSTMCell','num_layer':1,'in': encoder_in_info[2],'hidden':encoder_hidden_info[2],'activation':activation},
+        {'cell': 'LSTMCell','num_layer':1,'in': encoder_in_info[2],'hidden':encoder_hidden_info[2],'activation':config.PARAM['activation']},
         {'input_size':128,'output_size':config.PARAM['code_size'],'num_layer':1,'cell':'BasicCell','mode':'fc','normalization':'none','activation':'tanh','raw':False}
         ]
         return encoder_info
@@ -88,12 +87,12 @@ class Decoder(nn.Module):
         [{'input_size':128,'output_size':128,'num_layer':1,'cell':'BasicCell','mode':'pass','normalization':'none','activation':'none','raw':True}],        
         ]
         decoder_info = [
-        {'input_size':config.PARAM['code_size'],'output_size':128,'num_layer':1,'cell':'BasicCell','mode':'fc','normalization':'none','activation':activation,'raw':False},      
-        {'cell': 'LSTMCell','num_layer':1,'in': decoder_in_info[0],'hidden':decoder_hidden_info[0],'activation':activation},
+        {'input_size':config.PARAM['code_size'],'output_size':128,'num_layer':1,'cell':'BasicCell','mode':'fc','normalization':'none','activation':config.PARAM['activation'],'raw':False},      
+        {'cell': 'LSTMCell','num_layer':1,'in': decoder_in_info[0],'hidden':decoder_hidden_info[0],'activation':config.PARAM['activation']},
         {'cell':'ShuffleCell','mode':'up','scale_factor':2},
-        {'cell': 'LSTMCell','num_layer':1,'in': decoder_in_info[1],'hidden':decoder_hidden_info[1],'activation':activation},
+        {'cell': 'LSTMCell','num_layer':1,'in': decoder_in_info[1],'hidden':decoder_hidden_info[1],'activation':config.PARAM['activation']},
         {'cell':'ShuffleCell','mode':'up','scale_factor':2},
-        {'cell': 'LSTMCell','num_layer':1,'in': decoder_in_info[2],'hidden':decoder_hidden_info[2],'activation':activation},
+        {'cell': 'LSTMCell','num_layer':1,'in': decoder_in_info[2],'hidden':decoder_hidden_info[2],'activation':config.PARAM['activation']},
         {'cell':'ShuffleCell','mode':'up','scale_factor':2},        
         {'input_size':32,'output_size':3,'num_layer':1,'cell':'BasicCell','mode':'fc','normalization':'none','activation':'tanh','raw':False},
         ]
@@ -174,8 +173,8 @@ class Classifier(nn.Module):
         [{'input_size':self.classes_size,'output_size':self.classes_size,'num_layer':1,'cell':'BasicCell','mode':'fc','normalization':'none','activation':'none','raw':True}],      
         ]
         classifier_info = [
-        {'cell': 'LSTMCell','num_layer':1,'in': classifier_in_info[0],'hidden':classifier_hidden_info[0],'activation':activation},
-        {'cell': 'LSTMCell','num_layer':1,'in': classifier_in_info[1],'hidden':classifier_hidden_info[1],'activation':activation},
+        {'cell': 'LSTMCell','num_layer':1,'in': classifier_in_info[0],'hidden':classifier_hidden_info[0],'activation':config.PARAM['activation']},
+        {'cell': 'LSTMCell','num_layer':1,'in': classifier_in_info[1],'hidden':classifier_hidden_info[1],'activation':config.PARAM['activation']},
         ]
         return classifier_info
 
