@@ -267,8 +267,8 @@ def split_dataset(train_dataset,test_dataset,data_size,batch_size,radomGen,shuff
         else:
             batch_size[i] = batch_size[i]*world_size
     train_batch_size,test_batch_size = batch_size
-    train_dataset = torch.utils.data.Subset(train_dataset, data_idx)       
-    train_loader = torch.utils.data.DataLoader(dataset=train_dataset, 
+    train_dataset = torch.utils.data.Subset(train_dataset, data_idx)
+    train_loader = torch.utils.data.DataLoader(dataset=train_dataset,
                 shuffle=shuffle, batch_size=train_batch_size, pin_memory=True, sampler=None, num_workers=num_workers*world_size, collate_fn=collate_fn)    
     test_loader = torch.utils.data.DataLoader(dataset=test_dataset,
                 batch_size=test_batch_size, pin_memory=True, num_workers=num_workers*world_size, collate_fn=collate_fn)
@@ -488,4 +488,3 @@ class Stats(object):
             self.std = torch.sqrt(m/(m+n)*old_std**2 + n/(m+n)*new_std**2 + m*n/(m+n)**2 * (old_mean - new_mean)**2)
             self.n_samples += n
         return
-    
