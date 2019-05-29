@@ -9,6 +9,7 @@ from sklearn.metrics import *
 from sklearn.utils.linear_assignment_ import linear_assignment
 from sklearn.metrics import roc_curve, auc
 from utils import dict_to_device
+
 device = config.PARAM['device']
 
 def SSIM(output, target, window_size=11, MAX=1, window=None, full=False):

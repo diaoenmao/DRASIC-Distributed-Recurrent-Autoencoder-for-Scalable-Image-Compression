@@ -11,6 +11,7 @@ from torch.utils.data.dataloader import default_collate
 from torch.utils.data.sampler import SubsetRandomSampler
 from torch.utils.data.distributed import DistributedSampler
 from utils import *
+
 seed = 1234
 if_dist = False
 world_size = config.PARAM['world_size']

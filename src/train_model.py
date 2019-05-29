@@ -1,5 +1,6 @@
 import torch
 import config
+config.init()
 import time
 import torch.backends.cudnn as cudnn
 import models
@@ -15,7 +16,6 @@ from metrics import *
 
 cudnn.benchmark = True
 parser = argparse.ArgumentParser(description='Config')
-config.init()
 for k in config.PARAM:
     exec('parser.add_argument(\'--{0}\',default=config.PARAM[\'{0}\'], help=\'\')'.format(k))
 args = vars(parser.parse_args())
@@ -135,7 +135,7 @@ def test(validation_loader,model,epoch,protocol,model_TAG):
             input['label'] = input['label'][input['label']<protocol['num_class']] if(protocol['num_class']>0) else input['label']
             input = dict_to_device(input,device)
             protocol = update_test_protocol(input,protocol)  
-            output = model(input,protocol)[-1]
+            output = model(input,protocol)[-1] if('iter' in model_TAG) else model(input,protocol)
             output['loss'] = torch.mean(output['loss']) if(world_size > 1) else output['loss']
             evaluation = meter_panel.eval(input,output,protocol)
             batch_time = time.time() - end

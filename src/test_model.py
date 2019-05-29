@@ -1,22 +1,20 @@
 import torch
 import config
+config.init()
 import time
 import torch.backends.cudnn as cudnn
 import models
-import torch.optim as optim
 import os
 import datetime
 import argparse
 import itertools
 from torch import nn
-from torch.optim.lr_scheduler import MultiStepLR, ReduceLROnPlateau
 from data import *
 from utils import *
 from metrics import *
 
 cudnn.benchmark = True
 parser = argparse.ArgumentParser(description='Config')
-config.init()
 for k in config.PARAM:
     exec('parser.add_argument(\'--{0}\',default=config.PARAM[\'{0}\'], help=\'\')'.format(k))
 args = vars(parser.parse_args())
@@ -69,12 +67,12 @@ def runExperiment(model_TAG):
     activate_node = 1 if config.PARAM['num_node']['E']==0 else config.PARAM['num_node']['E']
     for i in range(activate_node):
         test_protocol = init_test_protocol(test_dataset,i)
-        result = test(test_loader,model,last_epoch,test_protocol,model_TAG)
-        print_result(last_epoch,i,result)
+        result = test(test_loader,model,last_epoch,test_protocol)
+        print_result(model_TAG,last_epoch,i,result)
         model_result.append(result)
     return model_result
     
-def test(validation_loader,model,epoch,protocol,model_TAG):
+def test(validation_loader,model,epoch,protocol):
     entropy_codec = models.classic.Entropy()
     meter_panel = [Meter_Panel(protocol['metric_names']) for _ in range(protocol['num_iter'])]
     with torch.no_grad():
@@ -87,7 +85,7 @@ def test(validation_loader,model,epoch,protocol,model_TAG):
             input = dict_to_device(input,device)
             protocol = update_test_protocol(input,i,len(validation_loader),protocol)
             output = model(input,protocol)
-            for j in range(protocol['max_num_iter']):
+            for j in range(protocol['num_iter']):
                 output[j]['loss'] = torch.mean(output[j]['loss']) if(world_size > 1) else output[j]['loss']
                 output[j]['compression']['code'] = entropy_codec.encode(output[j]['compression']['code'],protocol)
                 evaluation = meter_panel[j].eval(input,output[j],protocol)
@@ -126,9 +124,9 @@ def update_test_protocol(input,i,num_batch,protocol):
         raise ValueError('Wrong number of channel')
     return protocol
 
-def print_result(epoch,activate_node,result):
+def print_result(model_TAG,epoch,activate_node,result):
     for i in range(config.PARAM['num_iter']):
-        print('Test Epoch: {}({}_{}){}'.format(epoch,activate_node,i,result[i].summary(['loss']+config.PARAM['test_metric_names'])))
+        print('Test Epoch({}): {}({}_{}){}'.format(model_TAG,epoch,activate_node,i,result[i].summary(['loss']+config.PARAM['test_metric_names'])))
     return
     
 if __name__ == "__main__":

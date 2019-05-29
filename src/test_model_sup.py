@@ -1,15 +1,14 @@
 import torch
 import config
+config.init()
 import time
 import torch.backends.cudnn as cudnn
 import models
-import torch.optim as optim
 import os
 import datetime
 import argparse
 import itertools
 from torch import nn
-from torch.optim.lr_scheduler import MultiStepLR, ReduceLROnPlateau
 from data import *
 from utils import *
 from metrics import *
@@ -71,12 +70,12 @@ def runExperiment(model_TAG):
     activate_node = 1 if config.PARAM['num_node']['E']==0 else config.PARAM['num_node']['E']
     for i in range(activate_node):
         test_protocol = init_test_protocol(test_dataset,i)
-        result = test(test_loader,model,last_epoch,test_protocol,model_TAG)
-        print_result(last_epoch,i,result)
+        result = test(test_loader,model,last_epoch,test_protocol)
+        print_result(model_TAG,last_epoch,i,result)
         model_result.append(result)
     return model_result
     
-def test(validation_loader,model,epoch,protocol,model_TAG):
+def test(validation_loader,model,epoch,protocol):
     entropy_codec = models.classic.Entropy()
     meter_panel = Meter_Panel(protocol['metric_names'])
     with torch.no_grad():
@@ -127,8 +126,8 @@ def update_test_protocol(input,i,num_batch,protocol):
         raise ValueError('Wrong number of channel')
     return protocol
 
-def print_result(epoch,activate_node,result):
-    print('Test Epoch: {}({}){}'.format(epoch,activate_node,result.summary(['loss']+config.PARAM['test_metric_names'])))
+def print_result(model_TAG,epoch,activate_node,result):
+    print('Test Epoch({}): {}({}){}'.format(model_TAG,epoch,activate_node,result.summary(['loss']+config.PARAM['test_metric_names'])))
     return
     
 if __name__ == "__main__":

@@ -10,7 +10,6 @@ import time
 from PIL import Image
 from utils import *
 
-config.init()
 device = config.PARAM['device']
 
 class Magick(nn.Module):

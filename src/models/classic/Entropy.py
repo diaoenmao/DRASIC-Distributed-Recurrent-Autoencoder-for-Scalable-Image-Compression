@@ -5,7 +5,6 @@ import numpy as np
 import config
 import torchvision.transforms as transforms
 
-config.init()
 device = config.PARAM['device']
 
 class Entropy(object):

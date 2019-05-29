@@ -4,7 +4,8 @@ import torch.nn.functional as F
 import torch.utils.model_zoo as model_zoo
 import config
 from utils import RGB_to_L, L_to_RGB
-config.init()
+from modules import Cell
+
 device = config.PARAM['device']
 max_depth = 3
 max_channel = 512
@@ -134,20 +135,20 @@ class ResNet(nn.Module):
         return layers
         
     def forward(self, input, protocol):
-        output = {'loss':torch.tensor(0,device=device,dtype=torch.float32),
-                'compression':{'img':torch.tensor(0,device=device,dtype=torch.float32),'code':[]},
-                'classification':torch.tensor(0,device=device,dtype=torch.float32)}
         if(self.if_classify):
-            x = L_to_RGB(input['img']) if (protocol['mode'] == 'L') else input['img']
+            x = L_to_RGB(input['img']) if (protocol['img_mode'] == 'L') else input['img']
             x = F.relu(self.bn1(self.conv1(x)))
             for i in range(len(self.layers)):
                 x = self.layers[i](x)
             output['compression']['code'] = x
-            output['classification'] = self.classifier(x)
+            output['classification'] = self.classifier(x,protocol)
             output['loss'] = protocol['tuning_param']['classification']*self.classifier.classification_loss_fn(input,output,protocol)
             return output
         else:
-            x = L_to_RGB(input) if (protocol['mode'] == 'L') else input
+            output = {'loss':torch.tensor(0,device=device,dtype=torch.float32),
+            'compression':{'img':torch.tensor(0,device=device,dtype=torch.float32),'code':[]},
+            'classification':torch.tensor(0,device=device,dtype=torch.float32)}
+            x = L_to_RGB(input) if (protocol['img_mode'] == 'L') else input
             x = F.relu(self.bn1(self.conv1(x)))
             for i in range(len(self.layers)):
                 x = self.layers[i](x)
