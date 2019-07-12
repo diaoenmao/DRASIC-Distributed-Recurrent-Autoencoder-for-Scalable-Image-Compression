@@ -1,17 +1,15 @@
-import time
-import torch
-import torchvision
-import itertools
-import os
-import sys
-import cv2
+import config
+import collections.abc as container_abcs
 import errno
 import numpy as np
+import os
+import time
+import torch
 import torch.nn as nn
-import collections.abc as container_abcs
-from PIL import Image
+import torchvision
 from itertools import repeat
 from matplotlib import pyplot as plt
+from PIL import Image
 from torchvision.utils import make_grid
 from torchvision.utils import save_image
 
@@ -84,60 +82,6 @@ def list_files(root, suffix, prefix=False):
         files = [os.path.join(root, d) for d in files]
     return files
     
-def get_correct_cnt(output,target):
-    max_index = output.max(dim = 1)[1]  
-    correct_cnt = (max_index == target).float().sum()
-    return correct_cnt
-    
-def modelselect_input_feature(dims,init_size=2,step_size=1,start_point=None):
-    if(isinstance(dims, int)):
-        dims = [dims]
-    init_size=[init_size]*len(dims) 
-    step_size = [step_size]*len(dims) 
-    if (start_point is None):
-        start_point = [np.int(dims[i]/2) for i in range(len(dims))]
-    else:
-        start_point = [0 for i in range(len(dims))]
-    ifcovered = [False]*len(dims)
-    input_features = []
-    j = 0
-    while(not np.all(ifcovered)):
-        valid_indices = []
-        for i in range(len(dims)):
-            indices = np.arange(start_point[i]-init_size[i]/2-j*step_size[i],start_point[i]+init_size[i]/2+j*step_size[i],dtype=np.int)
-            cur_valid_indices = indices[(indices>=0)&(indices<=(dims[i]-1))]
-            ifcovered[i] = np.any(indices<=0) and np.any(indices>=(dims[i]-1))
-            valid_indices.append(cur_valid_indices)
-        mesh_indices = tuple(np.meshgrid(*valid_indices, sparse=False, indexing='ij'))
-        raveled_indices = np.ravel_multi_index(mesh_indices, dims=dims, order='C') 
-        raveled_indices = raveled_indices.ravel()    
-        input_features.append(raveled_indices)
-        j = j + 1
-    return input_features
-
-def gen_hidden_layers(max_num_nodes,init_size=None,step_size=None):
-    if (init_size is None):
-        init_size=[1]*len(max_num_nodes) 
-    if (step_size is None):
-        step_size = [1]*len(max_num_nodes)
-    num_nodes = []
-    hidden_layers = []
-    for i in range(len(max_num_nodes)):
-        num_nodes.append(list(range(init_size[i],max_num_nodes[i]+1,step_size[i])))
-    while(len(num_nodes) != 0):
-        hidden_layers.extend(list(itertools.product(*num_nodes)))
-        del num_nodes[-1]   
-    return hidden_layers
-        
-def PIL_to_CV2(pil_img):
-    cv2_img = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
-    return cv2_img
-    
-def CV2_to_PIL(cv2_img):
-    cv2_img = cv2.cvtColor(cv2_img,cv2.COLOR_BGR2RGB)
-    pil_img = Image.fromarray(cv2_img)
-    return pil_img
-    
 def save_img(img,path,nrow=0,batch_first=False):
     if(img.dim()==4):
         dirname = os.path.dirname(path)
@@ -196,12 +140,12 @@ def pad_sequence(sequences, batch_first=False, padding_value=0):
 
     return out_tensor, lengths
     
-def _ntuple(n):
+def ntuple(n):
     def parse(x):
         if isinstance(x, container_abcs.Iterable) and not isinstance(x, str):
             return x
         return tuple(repeat(x, n))
-    return parse  
+    return parse
     
 def apply_along_dim(input, *other_input, fn, dim, m='flat', **other_kinput):
     _tuple = _ntuple(2)
@@ -229,7 +173,7 @@ def apply_fn(module,fn):
         if(sum(1 for _ in m.named_children())!=0):
             exec('apply_fn(m,\'{0}\')'.format(fn))
     return
-    
+
 # ===================Function===================== 
 def p_inverse(A):
     pinv = (A.t().matmul(A)).inverse().matmul(A.t())
@@ -242,22 +186,38 @@ def RGB_to_L(input):
 def L_to_RGB(input):
     output = input.expand(input.size(0),3,input.size(2),input.size(3))
     return output
+
+def gumbel_softmax(logits, tau=1, hard=False, sample=True, dim=-1):
+    if(sample):
+        eps = 1e-20
+        U = torch.rand(logits.size(),device=logits.device)
+        noise = -(torch.log(-torch.log(U + eps) + eps))
+        gumbels = (logits + noise) / tau
+    else:
+        gumbels = logits / tau
+    y_soft = gumbels.softmax(dim)
+    if hard:
+        index = y_soft.max(dim,keepdim=True)[1]
+        y_hard = torch.zeros_like(logits).scatter_(dim,index,1.0)
+        ret = (y_hard - y_soft).detach() + y_soft
+    else:
+        ret = y_soft
+    return ret
+
+def gumbel_softrank(logits, tau=1, hard=False, sample=True, dim=-1):
+    if(sample):
+        eps = 1e-20
+        U = torch.rand(logits.size(),device=logits.device)
+        noise = -(torch.log(-torch.log(U + eps) + eps))
+        gumbels = (logits + noise) / tau
+    else:
+        gumbels = logits / tau
+    y_soft = gumbels.softmax(dim)
+    if hard:
+        index = y_soft.topk(y_soft.size(dim),dim)[1].view(-1,1)
+        y_hard = logits.new_zeros(logits.size(dim),logits.size(dim)).scatter_(dim, index, 1.0)
+        ret = (y_hard - y_soft).detach() + y_soft
+    else:
+        ret = y_soft
+    return ret
     
-# ===================Figure===================== 
-def plt_dist(x):
-    plt.figure()
-    plt.hist(x)
-    plt.show()
-    return
-    
-def plt_meter(Meters,names,TAG):
-    colors = ['r','b']
-    print('Figure name: {}'.format(TAG))
-    for i in range(len(Meters)):
-        fig = plt.figure()
-        plt.plot(Meters[i][3].history_avg,label=names[i],color=colors[i])
-        plt.legend()
-        plt.grid()
-        makedir_exist_ok('./output/fig/{}'.format(names[i])) 
-        fig.savefig('./output/fig/{}/{}'.format(names[i],TAG), dpi=fig.dpi)
-    return

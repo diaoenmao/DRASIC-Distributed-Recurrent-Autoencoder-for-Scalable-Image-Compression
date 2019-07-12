@@ -1,9 +1,9 @@
-import os
 import numpy as np
+import os
 import torch
 from PIL import Image
-from torch.utils.data import Dataset
 from pycocotools.coco import COCO
+from torch.utils.data import Dataset
 
 class CocoDetection(Dataset):
     def __init__(self, root, annFile, transform=None):

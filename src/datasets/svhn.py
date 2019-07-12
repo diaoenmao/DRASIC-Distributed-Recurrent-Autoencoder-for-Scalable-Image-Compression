@@ -1,12 +1,10 @@
-import os
-import os.path
 import numpy as np
+import os
 import torch
 from PIL import Image
 from torch.utils.data import Dataset
 from utils import makedir_exist_ok
 from .utils import download_url, check_integrity
-
 
 class SVHN(Dataset):
     url = ""

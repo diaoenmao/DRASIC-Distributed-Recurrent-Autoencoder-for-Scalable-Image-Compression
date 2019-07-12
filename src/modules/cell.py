@@ -1,41 +1,49 @@
-import torch
 import config
+import copy
+import torch
+import math
+import numpy as np
 import torch.nn as nn
 import torch.nn.functional as F
-from collections import OrderedDict 
-from utils import _ntuple,apply_along_dim
+from collections import OrderedDict
+from modules.channel import Channel  
 from modules.shuffle import PixelUnShuffle,PixelShuffle
+from modules.organic import oConv2d
+from modules.decor import decorConv2d
+from utils import ntuple,gumbel_softmax,gumbel_softrank
 
 device = config.PARAM['device']
 
-def Normalization(normalization,output_size):
-    if(normalization=='none'):
+def Normalization(cell_info):
+    if(cell_info['mode']=='none'):
         return nn.Sequential()
-    elif(normalization=='bn'):
-        return nn.BatchNorm2d(output_size)
-    elif(normalization=='in'):
-        return nn.InstanceNorm2d(output_size)
+    elif(cell_info['mode']=='bn'):
+        return nn.BatchNorm2d(cell_info['input_size'])
+    elif(cell_info['mode']=='in'):
+        return nn.InstanceNorm2d(cell_info['input_size'])
     else:
         raise ValueError('Normalization mode not supported')
     return
     
-def Activation(activation,inplace=False):
-    if(activation=='none'):
+def Activation(cell_info):
+    if(cell_info['mode']=='none'):
         return nn.Sequential()
-    elif(activation=='tanh'):
+    elif(cell_info['mode']=='tanh'):
         return nn.Tanh()
-    elif(activation=='relu'):
-        return nn.ReLU()
-    elif(activation=='prelu'):
+    elif(cell_info['mode']=='relu'):
+        return nn.ReLU(inplace=True)
+    elif(cell_info['mode']=='prelu'):
         return nn.PReLU()
-    elif(activation=='elu'):
-        return nn.ELU()
-    elif(activation=='selu'):
-        return nn.SELU()
-    elif(activation=='celu'):
-        return nn.CELU()
-    elif(activation=='logsoftmax'):
-        return nn.SoftMax(dim=-1)
+    elif(cell_info['mode']=='elu'):
+        return nn.ELU(inplace=True)
+    elif(cell_info['mode']=='selu'):
+        return nn.SELU(inplace=True)
+    elif(cell_info['mode']=='celu'):
+        return nn.CELU(inplace=True)
+    elif(cell_info['mode']=='sigmoid'):
+        return nn.Sigmoid()
+    elif(cell_info['mode']=='softmax'):
+        return nn.SoftMax()
     else:
         raise ValueError('Activation mode not supported')
     return
@@ -47,69 +55,386 @@ class BasicCell(nn.Module):
         self.cell = self.make_cell()
         
     def make_cell(self):
-        cell = nn.ModuleList([])
-        if(self.cell_info['mode']=='downsample'):
-            cell_info = {'cell':'Conv2d','normalization':self.cell_info['normalization'],'activation':self.cell_info['activation'],
-                        'input_size':self.cell_info['input_size'],'output_size':self.cell_info['output_size'],
-                        'kernel_size':2,'stride':2,'padding':0,'dilation':1,'group':1,'bias':False}
-        elif(self.cell_info['mode']=='pass'):
-            cell_info = {'cell':'Conv2d','normalization':self.cell_info['normalization'],'activation':self.cell_info['activation'],
-                        'input_size':self.cell_info['input_size'],'output_size':self.cell_info['output_size'],
-                        'kernel_size':3,'stride':1,'padding':1,'dilation':1,'group':1,'bias':False}
-        elif(self.cell_info['mode']=='upsample'):
-            cell_info = {'cell':'ConvTranspose2d','normalization':self.cell_info['normalization'],'activation':self.cell_info['activation'],
-                        'input_size':self.cell_info['input_size'],'output_size':self.cell_info['output_size'],
-                        'kernel_size':2,'stride':2,'padding':0,'output_padding':0,'dilation':1,'group':1,'bias':False}
-        elif(self.cell_info['mode']=='fc'):
-            cell_info = {'cell':'Conv2d','normalization':self.cell_info['normalization'],'activation':self.cell_info['activation'],
-                        'input_size':self.cell_info['input_size'],'output_size':self.cell_info['output_size'],
-                        'kernel_size':1,'stride':1,'padding':0,'dilation':1,'group':1,'bias':False}
+        cell_info = copy.deepcopy(self.cell_info)
+        cell = nn.ModuleDict({})
+        if(cell_info['mode']=='down'):
+            cell_in_info = {'cell':'Conv2d','input_size':cell_info['input_size'],'output_size':cell_info['output_size'],
+                        'kernel_size':3,'stride':2,'padding':1,'dilation':1,'groups':cell_info['groups'],'bias':cell_info['bias']}
+        elif(cell_info['mode']=='downsample'):
+            cell_in_info = {'cell':'Conv2d','input_size':cell_info['input_size'],'output_size':cell_info['output_size'],
+                        'kernel_size':2,'stride':2,'padding':0,'dilation':1,'groups':cell_info['groups'],'bias':cell_info['bias']}
+        elif(cell_info['mode']=='pass'):
+            cell_in_info = {'cell':'Conv2d','input_size':cell_info['input_size'],'output_size':cell_info['output_size'],
+                        'kernel_size':3,'stride':1,'padding':1,'dilation':1,'groups':cell_info['groups'],'bias':cell_info['bias']}
+        elif(cell_info['mode']=='upsample'):
+            cell_in_info = {'cell':'ConvTranspose2d','input_size':cell_info['input_size'],'output_size':cell_info['output_size'],
+                        'kernel_size':2,'stride':2,'padding':0,'output_padding':0,'dilation':1,'groups':cell_info['groups'],'bias':cell_info['bias']}
+        elif(cell_info['mode']=='fc'):
+            cell_in_info = {'cell':'Conv2d','input_size':cell_info['input_size'],'output_size':cell_info['output_size'],
+                        'kernel_size':1,'stride':1,'padding':0,'dilation':1,'groups':cell_info['groups'],'bias':cell_info['bias']}
+        elif(cell_info['mode']=='fc_down'):
+            cell_in_info = {'cell':'Conv2d','input_size':cell_info['input_size'],'output_size':cell_info['output_size'],
+                        'kernel_size':1,'stride':2,'padding':0,'dilation':1,'groups':cell_info['groups'],'bias':cell_info['bias']}
         else:
-            raise ValueError('Sample mode not supported')
-        for i in range(self.cell_info['num_layer']):
-            if(i>0):
-                cell_info = {**cell_info,'cell':'Conv2d','input_size':self.cell_info['output_size'],'kernel_size':3,'stride':1,'padding':1}
-            if(i==self.cell_info['num_layer']-1 and self.cell_info['raw']):
-                cell_info = {**cell_info,'activation':'none'}
-            cell.append(Cell(cell_info))
+            raise ValueError('model mode not supported')
+        cell['in'] = Cell(cell_in_info)
+        cell['activation'] = Cell({'cell':'Activation','mode':cell_info['activation']})
+        cell['normalization'] = Cell({'cell':'Normalization','input_size':cell_info['input_size'],'mode':cell_info['normalization']}) if(cell_info['order']=='before') else \
+        Cell({'cell':'Normalization','input_size':cell_info['output_size'],'mode':cell_info['normalization']})
         return cell
         
     def forward(self, input):
         x = input
-        if(x.dim()==4):
-            for i in range(self.cell_info['num_layer']):
-                x = self.cell[i](x)
-        elif(x.dim()==5):
-            for i in range(self.cell_info['num_layer']):
-                x = apply_along_dim(x, fn=self.cell[i], dim=1) 
+        if(self.cell_info['order']=='before'):
+            x = self.cell['in'](self.cell['activation'](self.cell['normalization'](x)))
+        elif(self.cell_info['order']=='after'):
+            x = self.cell['activation'](self.cell['normalization'](self.cell['in'](x)))
+        else:
+            raise ValueError('wrong order')
         return x
 
-class ResCell(nn.Module):
+class ResBasicCell(nn.Module):
     def __init__(self, cell_info):
-        super(ResCell, self).__init__()
+        super(ResBasicCell, self).__init__()
         self.cell_info = cell_info
         self.cell = self.make_cell()
         
     def make_cell(self):
-        cell = nn.ModuleList([nn.ModuleDict({}) for _ in range(self.cell_info['num_layer'])])
-        for i in range(self.cell_info['num_layer']):
-            if(i==0):
-                cell[i]['shortcut'] = Cell(self.cell_info['shortcut'][i])
-            cell[i]['in'] = Cell(self.cell_info['in'][i])
-            if(i==self.cell_info['num_layer']-1):
-                cell[i]['activation'] = Activation(self.cell_info['activation'])
+        cell_info = copy.deepcopy(self.cell_info)
+        cell = nn.ModuleList([nn.ModuleDict({}) for _ in range(cell_info['num_layer'])])
+        for i in range(cell_info['num_layer']):
+            if(cell_info['mode'] == 'down'):
+                cell_shortcut_info = {'input_size':cell_info['input_size'],'output_size':cell_info['output_size'],'cell':'BasicCell','mode':'fc_down',
+                'normalization':cell_info['normalization'],'activation':'none'}
+            elif(cell_info['input_size'] != cell_info['output_size']):
+                cell_shortcut_info = {'input_size':cell_info['input_size'],'output_size':cell_info['output_size'],'cell':'BasicCell','mode':'fc',
+                'normalization':cell_info['normalization'],'activation':'none'}
+            else:
+                cell_shortcut_info = {'cell':'none'}
+            cell_in_info = {'input_size':cell_info['input_size'],'output_size':cell_info['output_size'],'cell':'BasicCell','mode':cell_info['mode'],
+            'normalization':cell_info['normalization'],'activation':cell_info['activation']}
+            cell_out_info = {'input_size':cell_info['output_size'],'output_size':cell_info['output_size'],'cell':'BasicCell','mode':'pass',
+            'normalization':cell_info['normalization'],'activation':'none'}
+            cell[i]['shortcut'] = Cell(cell_shortcut_info)
+            cell[i]['in'] = Cell(cell_in_info)
+            cell[i]['out'] = Cell(cell_out_info)
+            cell[i]['activation'] = Cell({'cell':'Activation','mode':cell_info['activation']})
+            cell_info['input_size'] = cell_info['output_size']
+            cell_info['mode'] = 'pass'
         return cell
         
     def forward(self, input):
         x = input
         for i in range(len(self.cell)):
-            if(i==0):
-                shortcut = self.cell[i]['shortcut'](x)
+            shortcut = self.cell[i]['shortcut'](x)
             x = self.cell[i]['in'](x)
-            if(i==len(self.cell)-1):
-                x = self.cell[i]['activation'](x+shortcut)
+            x = self.cell[i]['out'](x)
+            x = self.cell[i]['activation'](x+shortcut)
+        return x
+
+class GroupResBasicCell(nn.Module):
+    def __init__(self, cell_info):
+        super(GroupResBasicCell, self).__init__()
+        self.cell_info = cell_info
+        self.cell = self.make_cell()
+        
+    def make_cell(self):
+        cell_info = copy.deepcopy(self.cell_info)
+        cell = nn.ModuleList([nn.ModuleDict({}) for _ in range(cell_info['num_layer'])])
+        for i in range(cell_info['num_layer']):
+            if(cell_info['mode'] == 'down'):
+                cell_shortcut_info = {'input_size':cell_info['input_size'],'output_size':cell_info['output_size'],'cell':'BasicCell','mode':'fc_down',
+                'normalization':cell_info['normalization'],'activation':'none'}
+            elif(cell_info['input_size'] != cell_info['output_size']):
+                cell_shortcut_info = {'input_size':cell_info['input_size'],'output_size':cell_info['output_size'],'cell':'BasicCell','mode':'fc',
+                'normalization':cell_info['normalization'],'activation':'none'}
+            else:
+                cell_shortcut_info = {'cell':'none'}
+            cell_in_info = {'input_size':cell_info['input_size'],'output_size':cell_info['output_size'],'cell':'BasicCell','mode':cell_info['mode'],
+            'normalization':cell_info['normalization'],'activation':cell_info['activation']}
+            cell_out_info = {'input_size':cell_info['output_size'],'output_size':cell_info['output_size'],'cell':'BasicCell','mode':'pass',
+            'normalization':cell_info['normalization'],'activation':'none','groups':cell_info['groups']}
+            cell[i]['shortcut'] = Cell(cell_shortcut_info)
+            cell[i]['in'] = Cell(cell_in_info)
+            cell[i]['out'] = Cell(cell_out_info)
+            cell[i]['activation'] = cell[i]['activation'] = Cell({'cell':'Activation','mode':cell_info['activation']})
+            cell_info['input_size'] = cell_info['output_size']
+            cell_info['mode'] = 'pass'
+        return cell
+        
+    def forward(self, input):
+        x = input
+        for i in range(len(self.cell)):
+            shortcut = self.cell[i]['shortcut'](x)
+            x = self.cell[i]['in'](x)
+            x = self.cell[i]['out'](x)
+            x = self.cell[i]['activation'](x+shortcut)
         return x
         
+class ShuffleGroupResBasicCell(nn.Module):
+    def __init__(self, cell_info):
+        super(ShuffleGroupResBasicCell, self).__init__()
+        self.cell_info = cell_info
+        self.cell = self.make_cell()
+
+    def make_cell(self):
+        cell_info = copy.deepcopy(self.cell_info)
+        cell = nn.ModuleList([nn.ModuleDict({}) for _ in range(cell_info['num_layer'])])
+        for i in range(cell_info['num_layer']):
+            if(cell_info['mode'] == 'down'):
+                cell_shortcut_info = {'input_size':cell_info['input_size'],'output_size':cell_info['output_size'],'cell':'BasicCell','mode':'fc_down',
+                'normalization':cell_info['normalization'],'activation':'none'}
+            elif(cell_info['input_size'] != cell_info['output_size']):
+                cell_shortcut_info = {'input_size':cell_info['input_size'],'output_size':cell_info['output_size'],'cell':'BasicCell','mode':'fc',
+                'normalization':cell_info['normalization'],'activation':'none'}
+            else:
+                cell_shortcut_info = {'cell':'none'}
+            cell_in_info = {'input_size':cell_info['input_size'],'output_size':cell_info['output_size'],'cell':'BasicCell','mode':cell_info['mode'],
+            'normalization':cell_info['normalization'],'activation':cell_info['activation'],'groups':cell_info['input_size']//cell_info['groups']}
+            cell_out_info = {'input_size':cell_info['output_size'],'output_size':cell_info['output_size'],'cell':'BasicCell','mode':'pass',
+            'normalization':cell_info['normalization'],'activation':'none','groups':cell_info['groups']}
+            cell[i]['shortcut'] = Cell(cell_shortcut_info)
+            cell[i]['in'] = Cell(cell_in_info)
+            cell[i]['out'] = Cell(cell_out_info)
+            cell[i]['activation'] = cell[i]['activation'] = Cell({'cell':'Activation','mode':cell_info['activation']})
+            cell[i]['in_shuffle'] = ShuffleCell({'input_size':[-1,cell_info['groups']],'dim':1,'permutation':[1,0]})
+            cell[i]['out_shuffle'] = ShuffleCell({'input_size':[cell_info['groups'],-1],'dim':1,'permutation':[1,0]})
+            cell_info['input_size'] = cell_info['output_size']
+            cell_info['mode'] = 'pass'
+        return cell
+        
+    def forward(self, input):
+        x = input
+        for i in range(len(self.cell)):
+            shortcut = self.cell[i]['shortcut'](x)
+            x = self.cell[i]['in'](x)
+            x = self.cell[i]['in_shuffle'](x)
+            x = self.cell[i]['out'](x)
+            x = self.cell[i]['out_shuffle'](x)            
+            x = self.cell[i]['activation'](x+shortcut)
+        return x
+        
+class BottleNeckCell(nn.Module):
+    def __init__(self, cell_info):
+        super(BottleNeckCell, self).__init__()
+        self.cell_info = cell_info
+        self.cell = self.make_cell()
+        
+    def make_cell(self):
+        cell_info = copy.deepcopy(self.cell_info)
+        cell = nn.ModuleList([nn.ModuleDict({}) for _ in range(cell_info['num_layer'])])
+        for i in range(cell_info['num_layer']):
+            if(cell_info['mode'] == 'down'):
+                cell_shortcut_info = {'input_size':cell_info['input_size'],'output_size':cell_info['output_size'],'cell':'BasicCell','mode':'fc_down',
+                'normalization':cell_info['normalization'],'activation':'none'}
+            elif(cell_info['input_size'] != cell_info['output_size']):
+                cell_shortcut_info = {'input_size':cell_info['input_size'],'output_size':cell_info['output_size'],'cell':'BasicCell','mode':'fc',
+                'normalization':cell_info['normalization'],'activation':'none'}
+            else:
+                cell_shortcut_info = {'cell':'none'} 
+            cell_reduce_info = {'input_size':cell_info['input_size'],'output_size':cell_info['neck_in_size'],'cell':'BasicCell','mode':'fc',
+            'normalization':cell_info['normalization'],'activation':cell_info['activation']}
+            cell_neck_info = {'input_size':cell_info['neck_in_size'],'output_size':cell_info['neck_out_size'],'cell':'BasicCell','mode':cell_info['mode'],
+            'normalization':cell_info['normalization'],'activation':cell_info['activation']}
+            cell_expand_info = {'input_size':cell_info['neck_out_size'],'output_size':cell_info['output_size'],'cell':'BasicCell','mode':'fc',
+            'normalization':cell_info['normalization'],'activation':'none'}
+            cell[i]['shortcut'] = Cell(cell_shortcut_info)
+            cell[i]['reduce'] = Cell(cell_reduce_info)
+            cell[i]['neck'] = Cell(cell_neck_info)
+            cell[i]['expand'] = Cell(cell_expand_info)
+            cell[i]['activation'] = Cell({'cell':'Activation','mode':cell_info['activation']})
+            cell_info['input_size'] = cell_info['output_size']
+            cell_info['mode'] = 'pass'
+        return cell
+        
+    def forward(self, input):
+        x = input
+        for i in range(len(self.cell)):
+            shortcut = self.cell[i]['shortcut'](x)
+            x = self.cell[i]['reduce'](x)
+            x = self.cell[i]['neck'](x)
+            x = self.cell[i]['expand'](x)
+            x = self.cell[i]['activation'](x+shortcut)
+        return x
+
+class GroupBottleNeckCell(nn.Module):
+    def __init__(self, cell_info):
+        super(GroupBottleNeckCell, self).__init__()
+        self.cell_info = cell_info
+        self.cell = self.make_cell()
+        
+    def make_cell(self):
+        cell_info = copy.deepcopy(self.cell_info)
+        cell = nn.ModuleList([nn.ModuleDict({}) for _ in range(cell_info['num_layer'])])
+        for i in range(cell_info['num_layer']):
+            if(cell_info['mode'] == 'down'):
+                cell_shortcut_info = {'input_size':cell_info['input_size'],'output_size':cell_info['output_size'],'cell':'BasicCell','mode':'fc_down',
+                'normalization':cell_info['normalization'],'activation':'none'}
+            elif(cell_info['input_size'] != cell_info['output_size']):
+                cell_shortcut_info = {'input_size':cell_info['input_size'],'output_size':cell_info['output_size'],'cell':'BasicCell','mode':'fc',
+                'normalization':cell_info['normalization'],'activation':'none'}
+            else:
+                cell_shortcut_info = {'cell':'none'} 
+            cell_in_info = {'input_size':cell_info['input_size'],'output_size':cell_info['neck_in_size'],'cell':'BasicCell','mode':'fc',
+            'normalization':cell_info['normalization'],'activation':cell_info['activation']}
+            cell_neck_info = {'input_size':cell_info['neck_in_size'],'output_size':cell_info['neck_out_size'],'cell':'BasicCell','mode':cell_info['mode'],
+            'normalization':cell_info['normalization'],'activation':cell_info['activation'],'groups':cell_info['groups']}
+            cell_out_info = {'input_size':cell_info['neck_out_size'],'output_size':cell_info['output_size'],'cell':'BasicCell','mode':'fc',
+            'normalization':cell_info['normalization'],'activation':'none'}
+            cell[i]['shortcut'] = Cell(cell_shortcut_info)
+            cell[i]['in'] = Cell(cell_in_info)
+            cell[i]['neck'] = Cell(cell_neck_info)
+            cell[i]['out'] = Cell(cell_out_info)
+            cell[i]['activation'] = Cell({'cell':'Activation','mode':cell_info['activation']})
+            cell_info['input_size'] = cell_info['output_size']
+            cell_info['mode'] = 'pass'
+        return cell
+        
+    def forward(self, input):
+        x = input
+        for i in range(len(self.cell)):
+            shortcut = self.cell[i]['shortcut'](x)
+            x = self.cell[i]['in'](x)
+            x = self.cell[i]['neck'](x)
+            x = self.cell[i]['out'](x)
+            x = self.cell[i]['activation'](x+shortcut)
+        return x
+
+class ShuffleGroupBottleNeckCell(nn.Module):
+    def __init__(self, cell_info):
+        super(ShuffleGroupBottleNeckCell, self).__init__()
+        self.cell_info = cell_info
+        self.cell = self.make_cell()
+        
+    def make_cell(self):
+        cell_info = copy.deepcopy(self.cell_info)
+        cell = nn.ModuleList([nn.ModuleDict({}) for _ in range(cell_info['num_layer'])])
+        for i in range(cell_info['num_layer']):
+            if(cell_info['mode'] == 'down'):
+                cell_shortcut_info = {'input_size':cell_info['input_size'],'output_size':cell_info['output_size'],'cell':'BasicCell','mode':'fc_down',
+                'normalization':cell_info['normalization'],'activation':'none'}
+            elif(cell_info['input_size'] != cell_info['output_size']):
+                cell_shortcut_info = {'input_size':cell_info['input_size'],'output_size':cell_info['output_size'],'cell':'BasicCell','mode':'fc',
+                'normalization':cell_info['normalization'],'activation':'none'}
+            else:
+                cell_shortcut_info = {'cell':'none'} 
+            cell_in_info = {'input_size':cell_info['input_size'],'output_size':cell_info['neck_in_size'],'cell':'BasicCell','mode':'fc',
+            'normalization':cell_info['normalization'],'activation':cell_info['activation'],'groups':cell_info['neck_in_size']//cell_info['groups']}
+            cell_neck_info = {'input_size':cell_info['neck_in_size'],'output_size':cell_info['neck_out_size'],'cell':'BasicCell','mode':cell_info['mode'],
+            'normalization':cell_info['normalization'],'activation':cell_info['activation'],'groups':cell_info['groups']}
+            cell_out_info = {'input_size':cell_info['neck_out_size'],'output_size':cell_info['output_size'],'cell':'BasicCell','mode':'fc',
+            'normalization':cell_info['normalization'],'activation':'none'}
+            cell[i]['shortcut'] = Cell(cell_shortcut_info)
+            cell[i]['in'] = Cell(cell_in_info)
+            cell[i]['neck'] = Cell(cell_neck_info)
+            cell[i]['out'] = Cell(cell_out_info)
+            cell[i]['activation'] = Cell({'cell':'Activation','mode':cell_info['activation']})
+            cell[i]['in_shuffle'] = ShuffleCell({'input_size':[-1,cell_info['groups']],'dim':1,'permutation':[1,0]})
+            cell[i]['out_shuffle'] = ShuffleCell({'input_size':[cell_info['groups'],-1],'dim':1,'permutation':[1,0]})
+            cell_info['input_size'] = cell_info['output_size']
+            cell_info['mode'] = 'pass'
+        return cell
+        
+    def forward(self, input):
+        x = input
+        for i in range(len(self.cell)):
+            shortcut = self.cell[i]['shortcut'](x)
+            x = self.cell[i]['in'](x)
+            x = self.cell[i]['in_shuffle'](x)
+            x = self.cell[i]['neck'](x)
+            x = self.cell[i]['out'](x)
+            x = self.cell[i]['out_shuffle'](x)
+            x = self.cell[i]['activation'](x+shortcut)
+        return x
+
+class DenseCell(nn.Module):
+    def __init__(self, cell_info):
+        super(DenseCell, self).__init__()
+        self.cell_info = cell_info
+        self.cell = self.make_cell()
+        
+    def make_cell(self):
+        cell_info = copy.deepcopy(self.cell_info)
+        cell = nn.ModuleList([nn.ModuleDict({}) for _ in range(cell_info['num_layer'])])
+        for i in range(cell_info['num_layer']):
+            cell_in_info = {'input_size':cell_info['input_size'],'output_size':cell_info['bottleneck']*cell_info['growth_rate'],'cell':'BasicCell','mode':'fc',
+            'normalization':cell_info['normalization'],'activation':cell_info['activation'],'order':'before'}
+            cell_out_info = {'input_size':cell_info['bottleneck']*cell_info['growth_rate'],'output_size':cell_info['growth_rate'],'cell':'BasicCell','mode':'pass',
+            'normalization':cell_info['normalization'],'activation':cell_info['activation'],'order':'before'}
+            cell[i]['in'] = Cell(cell_in_info)
+            cell[i]['out'] = Cell(cell_out_info)
+            cell_info['input_size'] = cell_info['input_size'] + cell_info['growth_rate']
+        return cell
+        
+    def forward(self, input):
+        x = input
+        for i in range(len(self.cell)):
+            shortcut = x
+            x = self.cell[i]['in'](x)
+            x = self.cell[i]['out'](x)
+            x = torch.cat([shortcut,x], dim=1)
+        return x
+
+class GroupDenseCell(nn.Module):
+    def __init__(self, cell_info):
+        super(GroupDenseCell, self).__init__()
+        self.cell_info = cell_info
+        self.cell = self.make_cell()
+        
+    def make_cell(self):
+        cell_info = copy.deepcopy(self.cell_info)
+        cell = nn.ModuleList([nn.ModuleDict({}) for _ in range(cell_info['num_layer'])])
+        for i in range(cell_info['num_layer']):
+            cell_in_info = {'input_size':cell_info['input_size'],'output_size':cell_info['bottleneck']*cell_info['growth_rate'],'cell':'BasicCell','mode':'fc',
+            'normalization':cell_info['normalization'],'activation':cell_info['activation'],'order':'before'}
+            cell_out_info = {'input_size':cell_info['bottleneck']*cell_info['growth_rate'],'output_size':cell_info['growth_rate'],'cell':'BasicCell','mode':'pass',
+            'normalization':cell_info['normalization'],'activation':cell_info['activation'],'groups':cell_info['groups'],'order':'before'}
+            cell[i]['in'] = Cell(cell_in_info)
+            cell[i]['out'] = Cell(cell_out_info)
+            cell_info['input_size'] = cell_info['input_size'] + cell_info['growth_rate']
+        return cell
+        
+    def forward(self, input):
+        x = input
+        for i in range(len(self.cell)):
+            shortcut = x
+            x = self.cell[i]['in'](x)
+            x = self.cell[i]['out'](x)
+            x = torch.cat([shortcut,x], dim=1)
+        return x
+
+class ShuffleGroupDenseCell(nn.Module):
+    def __init__(self, cell_info):
+        super(ShuffleGroupDenseCell, self).__init__()
+        self.cell_info = cell_info
+        self.cell = self.make_cell()
+
+    def make_cell(self):
+        cell_info = copy.deepcopy(self.cell_info)
+        cell = nn.ModuleList([nn.ModuleDict({}) for _ in range(cell_info['num_layer'])])
+        for i in range(cell_info['num_layer']):
+            cell_in_info = {'input_size':cell_info['input_size'],'output_size':cell_info['bottleneck']*cell_info['growth_rate'],'cell':'BasicCell','mode':'fc',
+            'normalization':'none','activation':'none','groups':cell_info['bottleneck']*cell_info['growth_rate']//cell_info['groups'],'order':'before'}
+            cell_out_info = {'input_size':cell_info['bottleneck']*cell_info['growth_rate'],'output_size':cell_info['growth_rate'],'cell':'BasicCell','mode':'pass',
+            'normalization':'none','activation':'none','groups':cell_info['groups'],'order':'before'}
+            cell[i]['in'] = Cell(cell_in_info)
+            cell[i]['out'] = Cell(cell_out_info)
+            cell[i]['in_shuffle'] = ShuffleCell({'input_size':[-1,cell_info['groups']],'dim':1,'permutation':[1,0]})
+            cell[i]['out_shuffle'] = ShuffleCell({'input_size':[cell_info['groups'],-1],'dim':1,'permutation':[1,0]})
+            cell_info['input_size'] = cell_info['input_size'] + cell_info['growth_rate']
+        return cell
+        
+    def forward(self, input):
+        x = input
+        for i in range(len(self.cell)):
+            shortcut = x
+            x = self.cell[i]['in'](x)
+            x = self.cell[i]['in_shuffle'](x)                                    
+            x = self.cell[i]['out'](x)
+            x = self.cell[i]['out_shuffle'](x)
+            x = torch.cat([shortcut,x], dim=1)
+        return x
+
 class LSTMCell(nn.Module):
     def __init__(self, cell_info):
         super(LSTMCell, self).__init__()
@@ -118,15 +443,16 @@ class LSTMCell(nn.Module):
         self.hidden = None
         
     def make_cell(self):
-        _tuple = _ntuple(2)
-        self.cell_info['activation'] = _tuple(self.cell_info['activation'])
-        cell = nn.ModuleList([nn.ModuleDict({}) for _ in range(self.cell_info['num_layer'])])
-        for i in range(self.cell_info['num_layer']):
-            cell_in_info = {**self.cell_info['in'][i],'output_size':4*self.cell_info['in'][i]['output_size']}
-            cell_hidden_info = {**self.cell_info['hidden'][i],'output_size':4*self.cell_info['hidden'][i]['output_size']}
+        cell_info = copy.deepcopy(self.cell_info)
+        _tuple = ntuple(2)
+        cell_info['activation'] = _tuple(cell_info['activation'])
+        cell = nn.ModuleList([nn.ModuleDict({}) for _ in range(cell_info['num_layer'])])
+        for i in range(cell_info['num_layer']):
+            cell_in_info = {**cell_info['in'][i],'output_size':4*cell_info['in'][i]['output_size']}
+            cell_hidden_info = {**cell_info['hidden'][i],'output_size':4*cell_info['hidden'][i]['output_size']}
             cell[i]['in'] = Cell(cell_in_info)
             cell[i]['hidden'] = Cell(cell_hidden_info)
-            cell[i]['activation'] = nn.ModuleList([Activation(self.cell_info['activation'][0]),Activation(self.cell_info['activation'][1])])
+            cell[i]['activation'] = nn.ModuleList([Activation(cell_info['activation'][0]),Activation(cell_info['activation'][1])])
         return cell
         
     def init_hidden(self, hidden_size):
@@ -179,18 +505,19 @@ class ResLSTMCell(nn.Module):
         self.hidden = None
         
     def make_cell(self):
-        _tuple = _ntuple(2)
-        self.cell_info['activation'] = _tuple(self.cell_info['activation'])
-        cell = nn.ModuleList([nn.ModuleDict({}) for _ in range(self.cell_info['num_layer'])])
-        for i in range(self.cell_info['num_layer']):
+        cell_info = copy.deepcopy(self.cell_info)
+        _tuple = ntuple(2)
+        cell_info['activation'] = _tuple(cell_info['activation'])
+        cell = nn.ModuleList([nn.ModuleDict({}) for _ in range(cell_info['num_layer'])])
+        for i in range(cell_info['num_layer']):
             if(i==0):
-                cell_shortcut_info = self.cell_info['shortcut'][i]
+                cell_shortcut_info = cell_info['shortcut'][i]
                 cell[i]['shortcut'] = Cell(cell_shortcut_info)
-            cell_in_info = {**self.cell_info['in'][i],'output_size':4*self.cell_info['in'][i]['output_size']}
-            cell_hidden_info = {**self.cell_info['hidden'][i],'output_size':4*self.cell_info['hidden'][i]['output_size']}
+            cell_in_info = {**cell_info['in'][i],'output_size':4*cell_info['in'][i]['output_size']}
+            cell_hidden_info = {**cell_info['hidden'][i],'output_size':4*cell_info['hidden'][i]['output_size']}
             cell[i]['in'] = Cell(cell_in_info)
             cell[i]['hidden'] = Cell(cell_hidden_info)            
-            cell[i]['activation'] = nn.ModuleList([Activation(self.cell_info['activation'][0]),Activation(self.cell_info['activation'][1])])         
+            cell[i]['activation'] = nn.ModuleList([Activation(cell_info['activation'][0]),Activation(cell_info['activation'][1])])         
         return cell
         
     def init_hidden(self, hidden_size):
@@ -244,13 +571,32 @@ class ShuffleCell(nn.Module):
     def __init__(self, cell_info):
         super(ShuffleCell, self).__init__()
         self.cell_info = cell_info
+        
+    def forward(self, input):
+        input_size = [*input.size()[:self.cell_info['dim']],*self.cell_info['input_size'],*input.size()[(self.cell_info['dim']+1):]]
+        permutation = [i for i in range(len(input.size()[:self.cell_info['dim']]))] + \
+                    [self.cell_info['permutation'][i]+self.cell_info['dim'] for i in range(len(self.cell_info['permutation']))] + \
+                    [i+self.cell_info['dim']+len(self.cell_info['input_size']) for i in range(len(input.size()[(self.cell_info['dim']+1):]))]
+        output_size = [*input.size()[:self.cell_info['dim']],-1,*input.size()[(self.cell_info['dim']+1):]]
+        x = input.reshape(input_size)
+        x = x.permute(permutation)
+        x = x.reshape(output_size)
+        return x
+
+class PixelShuffleCell(nn.Module):
+    def __init__(self, cell_info):
+        super(PixelShuffleCell, self).__init__()
+        self.cell_info = cell_info
         self.cell = self.make_cell()
         
     def make_cell(self):
-        if(self.cell_info['mode'] == 'down'):        
-            cell = PixelUnShuffle(self.cell_info['scale_factor'])
-        elif(self.cell_info['mode'] == 'up'):        
-            cell = PixelShuffle(self.cell_info['scale_factor'])
+        cell_info = copy.deepcopy(self.cell_info)
+        if(cell_info['mode'] == 'down'):        
+            cell = PixelUnShuffle(cell_info['scale_factor'])
+        elif(cell_info['mode'] == 'up'):        
+            cell = PixelShuffle(cell_info['scale_factor'])
+        else:
+            raise ValueError('model mode not supported')
         return cell
         
     def forward(self, input):
@@ -264,16 +610,208 @@ class PoolCell(nn.Module):
         self.cell = self.make_cell()
         
     def make_cell(self):
-        if(self.cell_info['mode'] == 'avg'):        
-            cell = nn.AdaptiveAvgPool2d(self.cell_info['output_size'])
-        elif(self.cell_info['mode'] == 'max'):        
-            cell = nn.AdaptiveMaxPool2d(self.cell_info['output_size'])
+        cell_info = copy.deepcopy(self.cell_info)
+        if(cell_info['mode'] == 'avg'):
+            cell = nn.AvgPool2d(kernel_size=cell_info['kernel_size'],stride=cell_info['stride'],padding=cell_info['padding'],
+            ceil_mode=cell_info['ceil_mode'],count_include_pad=cell_info['count_include_pad'])
+        elif(cell_info['mode'] == 'max'):
+            cell = nn.MaxPool2d(kernel_size=cell_info['kernel_size'],stride=cell_info['stride'],padding=cell_info['padding'],
+            dilation=cell_info['dilation'],return_indices=cell_info['return_indices'],ceil_mode=cell_info['ceil_mode'])
+        elif(cell_info['mode'] == 'maxun'):
+            cell = nn.MaxUnPool2d(kernel_size=cell_info['kernel_size'],stride=cell_info['stride'],padding=cell_info['padding'])
+        elif(cell_info['mode'] == 'adapt_avg'):
+            cell = nn.AdaptiveAvgPool2d(cell_info['output_size'])
+        elif(cell_info['mode'] == 'adapt_max'):
+            cell = nn.AdaptiveMaxPool2d(cell_info['output_size'])
+        else:
+            raise ValueError('model mode not supported')
         return cell
         
     def forward(self, input):
         x = self.cell(input)
         return x
+
+class DownTransitionCell(nn.Module):
+    def __init__(self, cell_info):
+        super(DownTransitionCell, self).__init__()
+        self.cell_info = cell_info
+        self.cell = self.make_cell()
+
+    def make_cell(self):
+        cell_info = copy.deepcopy(self.cell_info)
+        cell = []
+        if(cell_info['mode'] == 'cnn'):
+            cell.append(Cell({'input_size':cell_info['input_size'],'output_size':cell_info['output_size'],'cell':'BasicCell','mode':'downsample',
+                'normalization':cell_info['normalization'],'activation':cell_info['activation'],'order':cell_info['order']}))
+        elif(cell_info['mode'] == 'avg'):
+            cell.append(Cell({'cell':'PoolCell','mode':'avg','kernel_size':2}))
+        elif(cell_info['mode'] == 'max'):
+            cell.append(Cell({'cell':'PoolCell','mode':'max','kernel_size':2}))
+        elif(cell_info['mode'] == 'pixelshuffle'):
+            cell.append(Cell({'cell':'PixelShuffleCell','mode':'down','scale_factor':2}))
+        else:
+            raise ValueError('model mode not supported')
+        cell = nn.Sequential(*cell)
+        return cell
         
+    def forward(self, input):
+        x = input
+        x = self.cell(x)
+        return x
+
+class UpTransitionCell(nn.Module):
+    def __init__(self, cell_info):
+        super(UpTransitionCell, self).__init__()
+        self.cell_info = cell_info
+        self.cell = self.make_cell()
+
+    def make_cell(self):
+        cell_info = copy.deepcopy(self.cell_info)
+        cell = []
+        if(cell_info['mode'] == 'cnn'):
+            cell.append(Cell({'input_size':cell_info['input_size'],'output_size':cell_info['output_size'],'cell':'BasicCell','mode':'upsample',
+                'normalization':cell_info['normalization'],'activation':cell_info['activation'],'order':cell_info['order']}))
+        elif(cell_info['mode'] == 'max'):
+            cell.append(Cell({'cell':'PoolCell','mode':'maxun','kernel_size':2}))
+        elif(cell_info['mode'] == 'pixelshuffle'):
+            cell.append(Cell({'cell':'PixelShuffleCell','mode':'up','scale_factor':2}))
+        else:
+            raise ValueError('model mode not supported')
+        cell = nn.Sequential(*cell)
+        return cell
+        
+    def forward(self, input):
+        x = input
+        x = self.cell(x)
+        return x
+
+class ChannelCell(nn.Module):
+    def __init__(self, cell_info):
+        super(ChannelCell, self).__init__()
+        self.cell_info = cell_info
+        self.cell = self.make_cell()
+
+    def make_cell(self):
+        cell_info = copy.deepcopy(self.cell_info)
+        cell = Channel(cell_info['mode'],cell_info['snr'])
+        return cell
+        
+    def forward(self, input):
+        x = input
+        x = self.cell(x)
+        return x
+
+class decorBasicCell(nn.Module):
+    def __init__(self, cell_info):
+        super(decorBasicCell, self).__init__()
+        self.cell_info = cell_info
+        self.cell = self.make_cell()
+        
+    def make_cell(self):
+        cell_info = copy.deepcopy(self.cell_info)
+        cell = nn.ModuleDict({})
+        if(cell_info['mode']=='down'):
+            cell_in_info = {'cell':'decorConv2d','input_size':cell_info['input_size'],'output_size':cell_info['output_size'],
+                        'kernel_size':3,'stride':2,'padding':1,'dilation':1,'groups':cell_info['groups'],'bias':cell_info['bias']}
+        elif(cell_info['mode']=='downsample'):
+            cell_in_info = {'cell':'decorConv2d','input_size':cell_info['input_size'],'output_size':cell_info['output_size'],
+                        'kernel_size':2,'stride':2,'padding':0,'dilation':1,'groups':cell_info['groups'],'bias':cell_info['bias']}
+        elif(cell_info['mode']=='pass'):
+            cell_in_info = {'cell':'decorConv2d','input_size':cell_info['input_size'],'output_size':cell_info['output_size'],
+                        'kernel_size':3,'stride':1,'padding':1,'dilation':1,'groups':cell_info['groups'],'bias':cell_info['bias']}
+        elif(cell_info['mode']=='upsample'):
+            cell_in_info = {'cell':'ConvTranspose2d','input_size':cell_info['input_size'],'output_size':cell_info['output_size'],
+                        'kernel_size':2,'stride':2,'padding':0,'output_padding':0,'dilation':1,'groups':cell_info['groups'],'bias':cell_info['bias']}
+        elif(cell_info['mode']=='fc'):
+            cell_in_info = {'cell':'decorConv2d','input_size':cell_info['input_size'],'output_size':cell_info['output_size'],
+                        'kernel_size':1,'stride':1,'padding':0,'dilation':1,'groups':cell_info['groups'],'bias':cell_info['bias']}
+        elif(cell_info['mode']=='fc_down'):
+            cell_in_info = {'cell':'decorConv2d','input_size':cell_info['input_size'],'output_size':cell_info['output_size'],
+                        'kernel_size':1,'stride':2,'padding':0,'dilation':1,'groups':cell_info['groups'],'bias':cell_info['bias']}
+        else:
+            raise ValueError('model mode not supported')
+        cell['in'] = Cell(cell_in_info)
+        cell['activation'] = Cell({'cell':'Activation','mode':cell_info['activation']})
+        cell['normalization'] = Cell({'cell':'Normalization','input_size':cell_info['input_size'],'mode':cell_info['normalization']}) if(cell_info['order']=='before') else \
+        Cell({'cell':'Normalization','input_size':cell_info['output_size'],'mode':cell_info['normalization']})
+        return cell
+        
+    def forward(self, input):
+        x = input
+        if(self.cell_info['order']=='before'):
+            x = self.cell['in'](self.cell['activation'](self.cell['normalization'](x)))
+        elif(self.cell_info['order']=='after'):
+            x = self.cell['activation'](self.cell['normalization'](self.cell['in'](x)))
+        else:
+            raise ValueError('wrong order')
+        return x
+
+class decorResBasicCell(nn.Module):
+    def __init__(self, cell_info):
+        super(decorResBasicCell, self).__init__()
+        self.cell_info = cell_info
+        self.cell = self.make_cell()
+        
+    def make_cell(self):
+        cell_info = copy.deepcopy(self.cell_info)
+        cell = nn.ModuleList([nn.ModuleDict({}) for _ in range(cell_info['num_layer'])])
+        for i in range(cell_info['num_layer']):
+            if(cell_info['mode'] == 'down'):
+                cell_shortcut_info = {'input_size':cell_info['input_size'],'output_size':cell_info['output_size'],'cell':'decorBasicCell','mode':'fc_down',
+                'normalization':cell_info['normalization'],'activation':'none'}
+            elif(cell_info['input_size'] != cell_info['output_size']):
+                cell_shortcut_info = {'input_size':cell_info['input_size'],'output_size':cell_info['output_size'],'cell':'decorBasicCell','mode':'fc',
+                'normalization':cell_info['normalization'],'activation':'none'}
+            else:
+                cell_shortcut_info = {'cell':'none'}
+            cell_in_info = {'input_size':cell_info['input_size'],'output_size':cell_info['output_size'],'cell':'decorBasicCell','mode':cell_info['mode'],
+            'normalization':cell_info['normalization'],'activation':cell_info['activation']}
+            cell_out_info = {'input_size':cell_info['output_size'],'output_size':cell_info['output_size'],'cell':'decorBasicCell','mode':'pass',
+            'normalization':cell_info['normalization'],'activation':'none'}
+            cell[i]['shortcut'] = Cell(cell_shortcut_info)
+            cell[i]['in'] = Cell(cell_in_info)
+            cell[i]['out'] = Cell(cell_out_info)
+            cell[i]['activation'] = Cell({'cell':'Activation','mode':cell_info['activation']})
+            cell_info['input_size'] = cell_info['output_size']
+            cell_info['mode'] = 'pass'
+        return cell
+        
+    def forward(self, input):
+        x = input
+        for i in range(len(self.cell)):
+            shortcut = self.cell[i]['shortcut'](x)
+            x = self.cell[i]['in'](x)
+            x = self.cell[i]['out'](x)
+            x = self.cell[i]['activation'](x+shortcut)
+        return x
+
+class FractalBasicCell(nn.Module):
+    def __init__(self, cell_info):
+        super(FractalBasicCell, self).__init__()
+        self.cell_info = cell_info
+        self.cell = self.make_cell()
+
+    def make_cell(self):
+        cell_info = copy.deepcopy(self.cell_info)
+        cell = nn.ModuleList([nn.ModuleList([nn.ModuleDict({}) for _ in range(cell_info['num_layer'])]) for _ in range(cell_info['num_level'])])
+        for i in range(cell_info['num_level']):
+            for j in range(cell_info['num_layer']):
+                activation = cell_info['activation'] if(j<(cell_info['num_layer']-1)) else 'none'
+                cell_main_info = {'input_size':cell_info['input_size'],'output_size':cell_info['input_size'],'cell':'BasicCell','mode':cell_info['mode'],
+                'groups':cell_info['input_size']//(cell_info['fractal_rate']**i),'normalization':cell_info['normalization'],'activation':activation}
+                cell[i][j]['main'] = Cell(cell_main_info)
+            cell[i][-1]['activation'] = Cell({'cell':'Activation','mode':cell_info['activation']})
+        return cell
+        
+    def forward(self, input):
+        x = input
+        for i in range(self.cell_info['num_level']):
+            shortcut = x
+            for j in range(self.cell_info['num_layer']):
+                x = self.cell[i][j]['main'](x)
+            x = self.cell[i][-1]['activation'](x+shortcut)
+        return x
+
 class Cell(nn.Module):
     def __init__(self, cell_info):
         super(Cell, self).__init__()
@@ -283,38 +821,52 @@ class Cell(nn.Module):
     def make_cell(self):
         if(self.cell_info['cell'] == 'none'):
             cell = nn.Sequential()
+        elif(self.cell_info['cell'] == 'Normalization'):
+            cell = Normalization(self.cell_info)
+        elif(self.cell_info['cell'] == 'Activation'):
+            cell = Activation(self.cell_info)
         elif(self.cell_info['cell'] == 'Conv2d'):
-            default_cell_info = {'kernel_size':3,'stride':1,'padding':1,'dilation':1,'group':1,'bias':False,'normalization':'none','activation':'relu'}
+            default_cell_info = {'kernel_size':3,'stride':1,'padding':1,'dilation':1,'groups':1,'bias':False,'normalization':'none','activation':'relu'}
             self.cell_info = {**default_cell_info,**self.cell_info}
-            module = nn.Conv2d(self.cell_info['input_size'],self.cell_info['output_size'],self.cell_info['kernel_size'],\
-                self.cell_info['stride'],self.cell_info['padding'],self.cell_info['dilation'],self.cell_info['group'],self.cell_info['bias'])
-            normalization = Normalization(self.cell_info['normalization'],self.cell_info['output_size'])
-            activation = Activation(self.cell_info['activation'])
-            cell = nn.Sequential(OrderedDict([
-                                  ('module', module),
-                                  ('normalization', normalization),
-                                  ('activation', activation),
-                                ]))
+            cell = nn.Conv2d(self.cell_info['input_size'],self.cell_info['output_size'],self.cell_info['kernel_size'],\
+                self.cell_info['stride'],self.cell_info['padding'],self.cell_info['dilation'],self.cell_info['groups'],self.cell_info['bias'])
         elif(self.cell_info['cell'] == 'ConvTranspose2d'):
-            default_cell_info = {'kernel_size':3,'stride':1,'padding':1,'output_padding':0,'dilation':1,'group':1,'bias':False,'normalization':'none','activation':'relu'}
+            default_cell_info = {'kernel_size':3,'stride':1,'padding':1,'output_padding':0,'dilation':1,'groups':1,'bias':False,'normalization':'none','activation':'relu'}
             self.cell_info = {**default_cell_info,**self.cell_info}
-            module = nn.ConvTranspose2d(self.cell_info['input_size'],self.cell_info['output_size'],self.cell_info['kernel_size'],\
-                self.cell_info['stride'],self.cell_info['padding'],self.cell_info['output_padding'],self.cell_info['group'],self.cell_info['bias'],self.cell_info['dilation'])
-            normalization = Normalization(self.cell_info['normalization'],self.cell_info['output_size'])
-            activation = Activation(self.cell_info['activation'])
-            cell = nn.Sequential(OrderedDict([
-                                  ('module', module),
-                                  ('normalization', normalization),
-                                  ('activation', activation),
-                                ]))
+            cell = nn.ConvTranspose2d(self.cell_info['input_size'],self.cell_info['output_size'],self.cell_info['kernel_size'],\
+                self.cell_info['stride'],self.cell_info['padding'],self.cell_info['output_padding'],self.cell_info['groups'],self.cell_info['bias'],self.cell_info['dilation'])
+        elif(self.cell_info['cell'] == 'oConv2d'):
+            default_cell_info = {'kernel_size':3,'stride':1,'padding':1,'dilation':1,'groups':1,'bias':False}
+            self.cell_info = {**default_cell_info,**self.cell_info}
+            cell = oConv2d(self.cell_info['input_size'],self.cell_info['output_size'],self.cell_info['kernel_size'],\
+                self.cell_info['stride'],self.cell_info['padding'],self.cell_info['dilation'],self.cell_info['groups'],self.cell_info['bias'])
+        elif(self.cell_info['cell'] == 'decorConv2d'):
+            default_cell_info = {'kernel_size':3,'stride':1,'padding':1,'dilation':1,'groups':1,'bias':False}
+            self.cell_info = {**default_cell_info,**self.cell_info}
+            cell = decorConv2d(self.cell_info['input_size'],self.cell_info['output_size'],self.cell_info['kernel_size'],\
+                self.cell_info['stride'],self.cell_info['padding'],self.cell_info['dilation'],self.cell_info['groups'],self.cell_info['bias'])
         elif(self.cell_info['cell'] == 'BasicCell'):
-            default_cell_info = {'mode':'pass','normalization':'none','activation':'relu','raw':False}
+            default_cell_info = {'mode':'pass','normalization':'none','activation':'relu','groups':1,'bias':False,'order':'after'}
             self.cell_info = {**default_cell_info,**self.cell_info}
             cell = BasicCell(self.cell_info)
-        elif(self.cell_info['cell'] == 'ResCell'):
-            default_cell_info = {'normalization':'none','activation':'relu','raw':False}
-            self.cell_info = {**default_cell_info,**self.cell_info}
-            cell = ResCell(self.cell_info)
+        elif(self.cell_info['cell'] == 'ResBasicCell'):
+            cell = ResBasicCell(self.cell_info)
+        elif(self.cell_info['cell'] == 'GroupResBasicCell'):
+            cell = GroupResBasicCell(self.cell_info)
+        elif(self.cell_info['cell'] == 'ShuffleGroupResBasicCell'):
+            cell = ShuffleGroupResBasicCell(self.cell_info)
+        elif(self.cell_info['cell'] == 'BottleNeckCell'):
+            cell = BottleNeckCell(self.cell_info)
+        elif(self.cell_info['cell'] == 'GroupBottleNeckCell'):
+            cell = GroupBottleNeckCell(self.cell_info)
+        elif(self.cell_info['cell'] == 'ShuffleGroupBottleNeckCell'):
+            cell = ShuffleGroupBottleNeckCell(self.cell_info)
+        elif(self.cell_info['cell'] == 'DenseCell'):
+            cell = DenseCell(self.cell_info)
+        elif(self.cell_info['cell'] == 'GroupDenseCell'):
+            cell = GroupDenseCell(self.cell_info)
+        elif(self.cell_info['cell'] == 'ShuffleGroupDenseCell'):
+            cell = ShuffleGroupDenseCell(self.cell_info)
         elif(self.cell_info['cell'] == 'LSTMCell'):
             default_cell_info = {'activation':'tanh'}
             self.cell_info = {**default_cell_info,**self.cell_info}
@@ -325,10 +877,30 @@ class Cell(nn.Module):
             cell = ResLSTMCell(self.cell_info)
         elif(self.cell_info['cell'] == 'ShuffleCell'):
             cell = ShuffleCell(self.cell_info)
+        elif(self.cell_info['cell'] == 'PixelShuffleCell'):
+            cell = PixelShuffleCell(self.cell_info)
         elif(self.cell_info['cell'] == 'PoolCell'):
-            cell = PoolCell(self.cell_info)              
+            default_cell_info = {'kernel_size':2,'stride':None,'padding':0,'dilation':1,'return_indices':False,'ceil_mode':False,'count_include_pad':True}
+            self.cell_info = {**default_cell_info,**self.cell_info}
+            cell = PoolCell(self.cell_info)
+        elif(self.cell_info['cell'] == 'DownTransitionCell'):
+            cell = DownTransitionCell(self.cell_info)
+        elif(self.cell_info['cell'] == 'UpTransitionCell'):
+            cell = UpTransitionCell(self.cell_info)
+        elif(self.cell_info['cell'] == 'ChannelCell'):
+            cell = ChannelCell(self.cell_info)
+        elif(self.cell_info['cell'] == 'decorBasicCell'):
+            default_cell_info = {'mode':'pass','normalization':'none','activation':'relu','groups':1,'bias':False,'order':'after'}
+            self.cell_info = {**default_cell_info,**self.cell_info}
+            cell = decorBasicCell(self.cell_info)
+        elif(self.cell_info['cell'] == 'decorResBasicCell'):
+            cell = decorResBasicCell(self.cell_info)
+        elif(self.cell_info['cell'] == 'FractalBasicCell'):
+            default_cell_info = {'mode':'pass','normalization':'none','activation':'relu','groups':1,'bias':False,'order':'after'}
+            self.cell_info = {**default_cell_info,**self.cell_info}
+            cell = FractalBasicCell(self.cell_info)
         else:
-            raise ValueError('parse model mode not supported')
+            raise ValueError('model mode not supported')
         return cell
         
     def forward(self, *input):

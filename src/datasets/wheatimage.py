@@ -1,9 +1,10 @@
+import numpy as np
 import os
 import torch
-import numpy as np
-from torch.utils.data import Dataset
 from PIL import Image
+from torch.utils.data import Dataset
 from .utils import default_loader, make_img_dataset, merge_classes, make_classes_counts
+
 IMG_EXTENSIONS = ['.bmp']
 
 class WheatImage(Dataset):

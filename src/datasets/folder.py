@@ -4,9 +4,9 @@ import torch
 from torch.utils.data import Dataset
 from utils import list_dir
 from .utils import default_loader, make_img_dataset, make_classes_counts
-IMG_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.ppm', '.bmp', '.pgm', '.tif']
 
-        
+IMG_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.ppm', '.bmp', '.pgm', '.tif']
+       
 class DatasetFolder(Dataset):
     def __init__(self, root, loader, extensions, transform=None):
         self.root = root

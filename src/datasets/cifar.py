@@ -1,14 +1,15 @@
-import os
-import sys
-import pickle
-import torch
 import numpy as np
+import os
+import pickle
+import sys
+import torch
 from PIL import Image
 from torch.utils.data import Dataset
 from utils import makedir_exist_ok
 from .utils import download_url, check_integrity, make_branch_classes_to_labels
 
 class CIFAR10(Dataset):
+    data_name = 'CIFAR10'
     base_folder = 'cifar-10-batches-py'
     url = "https://www.cs.toronto.edu/~kriz/cifar-10-python.tar.gz"
     filename = "cifar-10-python.tar.gz"
@@ -39,7 +40,9 @@ class CIFAR10(Dataset):
         'horse',
         'ship',
         'truck']
-        
+    feature_dim = {'img':1}
+    output_names = ['img','label']
+    
     def __init__(self, root, train=True,
                  transform=None, download=False):
         self.root = os.path.expanduser(root)
@@ -144,6 +147,7 @@ class CIFAR10(Dataset):
 
 
 class CIFAR100(CIFAR10):
+    data_name = 'CIFAR100'
     base_folder = 'cifar-100-python'
     url = "https://www.cs.toronto.edu/~kriz/cifar-100-python.tar.gz"
     filename = "cifar-100-python.tar.gz"
@@ -176,6 +180,8 @@ class CIFAR100(CIFAR10):
     'tank', 'telephone', 'television', 'tiger', 'tractor', 'train', 'trout',
     'tulip', 'turtle', 'wardrobe', 'whale', 'willow_tree', 'wolf', 'woman',
     'worm']
+    feature_dim = {'img':1}
+    output_names = ['img','label']
     
     def __init__(self, root, branch, **kwargs):
         super(CIFAR100, self).__init__(root, **kwargs)

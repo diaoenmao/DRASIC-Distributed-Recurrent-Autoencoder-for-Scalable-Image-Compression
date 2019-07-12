@@ -1,6 +1,6 @@
+import numpy as np
 import os
 import torch
-import numpy as np
 from torch.utils.data import Dataset
 from utils import *
 from .utils import make_classes_counts

@@ -1,9 +1,8 @@
-import numpy as np
-import torch
-import os
-import torch.utils.data as data_utils
-import tarfile
 import config
+import numpy as np
+import os
+import tarfile
+import torch
 import datasets
 import datasets.transforms as transforms
 from torch.utils.data import DataLoader
@@ -12,8 +11,7 @@ from torch.utils.data.sampler import SubsetRandomSampler
 from torch.utils.data.distributed import DistributedSampler
 from utils import *
 
-seed = 1234
-if_dist = False
+dist = False
 world_size = config.PARAM['world_size']
 num_workers = config.PARAM['num_workers']
 normalize = config.PARAM['normalize']
@@ -27,17 +25,13 @@ def fetch_dataset(data_name):
         train_dataset = datasets.MNIST(root=train_dir, train=True, download=True, transform=transforms.ToTensor())
         if(normalize):
             stats = make_stats(train_dataset,batch_size=128)
-            train_transform = transforms.Compose([transforms.Resize((32,32)),
-                                            transforms.ToTensor(),
+            train_transform = transforms.Compose([transforms.ToTensor(),
                                             transforms.Normalize(stats)])
-            test_transform = transforms.Compose([transforms.Resize((32,32)),
-                                            transforms.ToTensor(),
+            test_transform = transforms.Compose([transforms.ToTensor(),
                                             transforms.Normalize(stats)])
         else:
-            train_transform = transforms.Compose([transforms.Resize((32,32)),
-                                            transforms.ToTensor()])
-            test_transform = transforms.Compose([transforms.Resize((32,32)),
-                                            transforms.ToTensor()])           
+            train_transform = transforms.Compose([transforms.ToTensor()])
+            test_transform = transforms.Compose([transforms.ToTensor()])           
         train_dataset.transform = train_transform
         test_dataset = datasets.MNIST(root=test_dir, train=False, download=True, transform=test_transform)
 
@@ -45,8 +39,7 @@ def fetch_dataset(data_name):
         data_name=='EMNIST_balanced' or data_name=='EMNIST_letters' or data_name=='EMNIST_digits' or data_name=='EMNIST_mnist'):
         train_dir = './data/{}/train'.format(data_name.split('_')[0])
         test_dir = './data/{}/test'.format(data_name.split('_')[0])
-        transform = transforms.Compose([transforms.Resize((32,32)),
-                                        transforms.ToTensor()])
+        transform = transforms.Compose([transforms.ToTensor()])
         split = 'balanced' if len(data_name.split('_')) == 1 else data_name.split('_')[1]
         train_dataset = datasets.EMNIST(root=train_dir, split=split, branch=branch, train=True, download=True, transform=transform)
         test_dataset = datasets.EMNIST(root=test_dir, split=split, branch=branch, train=False, download=True, transform=transform)
@@ -54,8 +47,7 @@ def fetch_dataset(data_name):
     elif(data_name=='FashionMNIST'):
         train_dir = './data/{}/train'.format(data_name)
         test_dir = './data/{}/test'.format(data_name)
-        transform = transforms.Compose([transforms.Resize((32,32)),
-                                        transforms.ToTensor()])            
+        transform = transforms.Compose([transforms.ToTensor()])            
         train_dataset = datasets.FashionMNIST(root=train_dir, train=True, download=True, transform=transform)
         test_dataset = datasets.FashionMNIST(root=test_dir, train=False, download=True, transform=transform)
         
@@ -119,12 +111,21 @@ def fetch_dataset(data_name):
         train_dir = './data/{}/train'.format(data_name)
         test_dir = './data/{}/validation'.format(data_name)
         train_dataset = datasets.ImageFolder(train_dir, transform=transforms.ToTensor())
-        mean, std = make_stats(data_name,train_dataset)
-        transform = transforms.Compose([transforms.Resize((224,224)),
-                                        transforms.ToTensor(),
-                                        transforms.Normalize(mean, std)])
-        train_dataset.transform = transform
-        test_dataset = datasets.ImageFolder(test_dir, transform=transform)
+        if(normalize):
+            stats = make_stats(train_dataset,batch_size=128)
+            train_transform = transforms.Compose([transforms.Resize((224,224)),
+                                                transforms.ToTensor(),
+                                                transforms.Normalize(stats)])
+            test_transform = transforms.Compose([transforms.Resize((224,224)),
+                                                transforms.ToTensor(),
+                                                transforms.Normalize(stats)])
+        else:
+            train_transform = transforms.Compose([transforms.Resize((224,224)),
+                                                transforms.ToTensor()])
+            test_transform = transforms.Compose([transforms.Resize((224,224)),
+                                                transforms.ToTensor()])           
+        train_dataset.transform = train_transform
+        test_dataset = datasets.ImageFolder(test_dir, transform=test_transform)
 
     elif(data_name=='CUB2011'):
         train_dir = './data/{}/train'.format(data_name.split('_')[0])
@@ -242,8 +243,13 @@ def fetch_dataset(data_name):
             test_dir, transform)
         test_dataset = datasets.ImageFolder(
             test_dir, transform)
+
+    elif(data_name =='BITS'):
+        train_dataset = datasets.BITS(train=True)
+        test_dataset = datasets.BITS(train=False)
     else:
         raise ValueError('Not valid dataset name')
+
     print('data ready')
     return train_dataset,test_dataset
 
@@ -256,24 +262,17 @@ def input_collate(batch):
         return output
     else:
         return default_collate(batch)
-
-def split_dataset(train_dataset,test_dataset,data_size,batch_size,radomGen,shuffle=True,collate_fn=input_collate):
-    indices = list(range(len(train_dataset)))
-    data_idx = radomGen.choice(indices, size=data_size, replace=False)
-    if(isinstance(batch_size, int)):
-        batch_size = [batch_size, batch_size]
-    for i in range(2):
-        if(batch_size[i]==0):
-            batch_size[i] = data_size
-        else:
-            batch_size[i] = batch_size[i]*world_size
-    train_batch_size,test_batch_size = batch_size
-    train_dataset = torch.utils.data.Subset(train_dataset, data_idx)
-    train_loader = torch.utils.data.DataLoader(dataset=train_dataset,
-                shuffle=shuffle, batch_size=train_batch_size, pin_memory=True, sampler=None, num_workers=num_workers*world_size, collate_fn=collate_fn)    
-    test_loader = torch.utils.data.DataLoader(dataset=test_dataset,
-                batch_size=test_batch_size, pin_memory=True, num_workers=num_workers*world_size, collate_fn=collate_fn)
-    return train_loader,test_loader
+                
+def split_dataset(dataset,data_size,batch_size,radomGen=np.random.RandomState(1234),shuffle={'train':True,'test':False},collate_fn=input_collate):
+    data_loader = {}
+    for k in dataset:
+        data_size[k] = len(dataset[k]) if (data_size[k]==0) else data_size[k] 
+        batch_size[k] = data_size[k] if (batch_size[k]==0) else batch_size[k]            
+        data_idx_k = radomGen.choice(list(range(len(dataset[k]))), size=data_size[k], replace=False)
+        dataset_k = torch.utils.data.Subset(dataset[k], data_idx_k)     
+        data_loader[k] = torch.utils.data.DataLoader(dataset=dataset_k,
+                    shuffle=shuffle[k], batch_size=batch_size[k], pin_memory=True, sampler=None, num_workers=num_workers, collate_fn=collate_fn)    
+    return data_loader
     
 def split_dataset_cross_validation(train_dataset,test_dataset,data_size,batch_size,num_fold,radomGen,p=0.8):
     indices = list(range(len(train_dataset)))
@@ -285,12 +284,12 @@ def split_dataset_cross_validation(train_dataset,test_dataset,data_size,batch_si
     if(num_fold==1):
         train_idx = radomGen.choice(data_idx, size=int(data_size*p), replace=False)
         sub_train_dataset = torch.utils.data.Subset(train_dataset, train_idx)
-        train_sampler = DistributedSampler(sub_train_dataset) if (world_size > 1 and if_dist) else None
+        train_sampler = DistributedSampler(sub_train_dataset) if (world_size > 1 and dist) else None
         train_loader = [torch.utils.data.DataLoader(dataset=sub_train_dataset, 
                     shuffle=(train_sampler is None), batch_size=batch_size, pin_memory=True, sampler=train_sampler, num_workers=num_workers*world_size)]   
         validation_idx = list(set(data_idx) - set(train_idx))
         validation_dataset = torch.utils.data.Subset(train_dataset, validation_idx)
-        validation_sampler = DistributedSampler(validation_dataset) if (world_size > 1 and if_dist) else None
+        validation_sampler = DistributedSampler(validation_dataset) if (world_size > 1 and dist) else None
         validation_loader = [torch.utils.data.DataLoader(dataset=validation_dataset, 
                     batch_size=batch_size, pin_memory=True, sampler=validation_sampler, num_workers=num_workers*world_size)]
     elif(num_fold>1 and num_fold<=len(indices)):
@@ -301,11 +300,11 @@ def split_dataset_cross_validation(train_dataset,test_dataset,data_size,batch_si
             validation_idx = splitted_idx[i]
             train_idx = list(set(data_idx) - set(validation_idx))
             cur_train_dataset = torch.utils.data.Subset(train_dataset, train_idx)
-            cur_train_sampler = DistributedSampler(cur_train_dataset) if (world_size > 1 and if_dist) else None
+            cur_train_sampler = DistributedSampler(cur_train_dataset) if (world_size > 1 and dist) else None
             train_loader.append(torch.utils.data.DataLoader(dataset=cur_train_dataset, 
                 shuffle=(cur_train_sampler is None), batch_size=batch_size, pin_memory=True, sampler=cur_train_sampler, num_workers=num_workers*world_size)) 
             validation_dataset = torch.utils.data.Subset(train_dataset, validation_idx)
-            validation_sampler = DistributedSampler(validation_dataset) if (world_size > 1 and if_dist) else None
+            validation_sampler = DistributedSampler(validation_dataset) if (world_size > 1 and dist) else None
             validation_loader.append(torch.utils.data.DataLoader(dataset=train_dataset, 
                 batch_size=batch_size, pin_memory=True, sampler=validation_sampler, num_workers=num_workers*world_size))
     else:
@@ -315,7 +314,7 @@ def split_dataset_cross_validation(train_dataset,test_dataset,data_size,batch_si
                 batch_size=batch_size, pin_memory=True, num_workers=num_workers*world_size)
     return train_loader,validation_loader,test_loader
     
-def fetch_dataset_synth(input_feature,output_feature,high_dim=None,cov_mode='base',noise_sigma=np.sqrt(0.1),randomGen = np.random.RandomState(seed)):
+def fetch_dataset_synth(input_feature,output_feature,high_dim=None,cov_mode='base',noise_sigma=np.sqrt(0.1),randomGen=np.random.RandomState(1234)):
     print('fetching data...')
     data_size = 50000
     test_size = 10000
@@ -489,3 +488,4 @@ class Stats(object):
             self.std = torch.sqrt(m/(m+n)*old_std**2 + n/(m+n)*new_std**2 + m*n/(m+n)**2 * (old_mean - new_mean)**2)
             self.n_samples += n
         return
+    

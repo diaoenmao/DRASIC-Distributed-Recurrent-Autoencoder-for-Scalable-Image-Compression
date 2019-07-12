@@ -1,13 +1,12 @@
+import codecs
+import gzip
+import numpy as np
 import os
 import torch
-import gzip
-import codecs
-import numpy as np
-from torch.utils.data import Dataset
 from PIL import Image
+from torch.utils.data import Dataset
 from utils import makedir_exist_ok
 from .utils import download_url, make_branch_classes_to_labels
-
 
 class MNIST(Dataset):
     data_name = 'MNIST'

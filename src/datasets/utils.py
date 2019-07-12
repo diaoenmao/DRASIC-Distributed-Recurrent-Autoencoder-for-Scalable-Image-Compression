@@ -1,11 +1,10 @@
-import os
-import os.path
-import hashlib
 import errno
+import hashlib
+import os
 import torch
-from utils import makedir_exist_ok
-from tqdm import tqdm
 from PIL import Image
+from tqdm import tqdm
+from utils import makedir_exist_ok
 
 def pil_loader(path):
     with open(path, 'rb') as f:

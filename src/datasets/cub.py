@@ -1,12 +1,13 @@
-import os
-import torch
 import numpy as np
+import os
 import shutil
+import torch
 from torch.utils.data import Dataset
 from PIL import Image
 from utils import makedir_exist_ok
-from .utils import download_url, check_integrity
 from .folder import ImageFolder
+from .utils import download_url, check_integrity
+
 
 class CUB2011(ImageFolder):
     data_name = 'CUB2011'
