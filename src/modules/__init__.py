@@ -1,5 +1,3 @@
 from .cell import *
-from .channel import *
-from .quantizer import *
+from .quantization import *
 from .shuffle import *
-from .organic import *

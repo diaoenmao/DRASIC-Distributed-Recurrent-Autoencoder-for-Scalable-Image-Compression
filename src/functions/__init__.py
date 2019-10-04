@@ -1,3 +1,2 @@
-from .channel import *
-from .quantize import *
 from .shuffle import *
+from .quantize import *

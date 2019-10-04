@@ -1,64 +1,59 @@
 import os
-import sys
+import shutil
 import torch
 from torch.utils.data import Dataset
-from utils import list_dir
-from .utils import default_loader, make_img_dataset, make_classes_counts
+from utils import makedir_exist_ok, save, load
+from .utils import find_classes, make_img_dataset, make_classes_counts, default_loader, IMG_EXTENSIONS
 
-IMG_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.ppm', '.bmp', '.pgm', '.tif']
-       
-class DatasetFolder(Dataset):
-    def __init__(self, root, loader, extensions, transform=None):
-        self.root = root
-        self.loader = loader
-        self.extensions = extensions 
-        dirs = list_dir(self.root)
-        if(dirs != []):
-            self.classes, self.classes_to_labels = self._find_classes(self.root)
-            self.classes_size = len(self.classes_to_labels.keys())
-            self.output_names = ['img','label']
-            self.classes_counts = make_classes_counts(self.data['label'],self.classes_size)
-        else:
-            self.classes_to_labels = None
-            self.classes_size = 0
-            self.output_names = ['img']
-        self.data = make_img_dataset(self.root, self.extensions, self.classes_to_labels)       
+
+class ImageFolder(Dataset):
+    feature_dim = {'img': 1}
+
+    def __init__(self, root, transform=None):
+        self.root = os.path.expanduser(root)
         self.transform = transform
-
-    def _find_classes(self, dir):
-        if sys.version_info >= (3, 5):
-            classes = [d.name for d in os.scandir(dir) if d.is_dir()]
-        else:
-            classes = [d for d in os.listdir(dir) if os.path.isdir(os.path.join(dir, d))]
-        classes.sort()
-        classes_to_labels = {classes[i]: i for i in range(len(classes))}
-        return classes, classes_to_labels
+        self.data_name = os.path.basename(self.root)
+        if not self._check_exists():
+            makedir_exist_ok(self.raw_folder)
+            files = os.listdir(self.root)
+            for f in files:
+                print(f)
+                shutil.move(os.path.join(root, f), self.raw_folder)
+            classes_to_labels = find_classes(self.raw_folder)
+            dataset = make_img_dataset(self.raw_folder, IMG_EXTENSIONS, classes_to_labels)
+            save(dataset, os.path.join(self.processed_folder, 'data.pt'))
+            save(classes_to_labels, os.path.join(self.processed_folder, 'meta.pt'))
+        self.img, self.label = load(os.path.join(self.processed_folder, 'data.pt'))
+        self.classes_to_labels = load(os.path.join(self.processed_folder, 'meta.pt'))
+        self.classes = self.classes_to_labels.keys()
+        self.classes_size = len(self.classes)
+        self.classes_counts = make_classes_counts(self.label)
 
     def __getitem__(self, index):
-        input = {}
-        for k in self.output_names:
-            if(k == 'img'):
-                path = self.data['img'][index]
-                img = self.loader(path)
-                input['img'] = img
-            elif(k == 'label'):
-                input['label'] = torch.tensor(self.data['label'][index])
+        input = {'img': default_loader(self.img[index])} if not self.label else {
+            'img': default_loader(self.img[index]), 'label': torch.tensor(self.label[index])
+        }
         if self.transform is not None:
-            input = self.transform(input)            
+            input = self.transform(input)
         return input
 
     def __len__(self):
-        return len(self.data[self.output_names[0]])
-        
-    def __repr__(self):
-        fmt_str = 'Dataset ' + self.__class__.__name__ + '\n'
-        fmt_str += '    Number of datapoints: {}\n'.format(self.__len__())
-        fmt_str += '    Root Location: {}\n'.format(self.root)
-        tmp = '    Transforms (if any): '
-        fmt_str += '{0}{1}\n'.format(tmp, self.transform.__repr__().replace('\n', '\n' + ' ' * len(tmp)))
-        return fmt_str
+        return len(self.img)
 
-class ImageFolder(DatasetFolder):
-    def __init__(self, root, transform=None, loader=default_loader):
-        super(ImageFolder, self).__init__(root, loader, IMG_EXTENSIONS,
-                                          transform=transform)
+    @property
+    def processed_folder(self):
+        return os.path.join(self.root, 'processed')
+
+    @property
+    def raw_folder(self):
+        return os.path.join(self.root, 'raw')
+
+    def _check_exists(self):
+        return os.path.exists(self.processed_folder)
+
+    def __repr__(self):
+        fmt_str = 'Dataset {}\n'.format(self.__class__.__name__)
+        fmt_str += '    Number of data points: {}\n'.format(self.__len__())
+        fmt_str += '    Root: {}\n'.format(self.root)
+        fmt_str += '    Transforms: {}\n'.format(self.transform.__repr__())
+        return fmt_str

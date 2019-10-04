@@ -1,26 +1,26 @@
 import config
+
 config.init()
 import argparse
 import datetime
+import models
+import numpy as np
 import os
 import time
 import torch
 import torch.backends.cudnn as cudnn
 import torch.optim as optim
-import torch.nn as nn
-import models
-from torch.optim.lr_scheduler import MultiStepLR, ReduceLROnPlateau
-from data import *
-from metrics import *
-from modules import Cell, oConv2d
-from utils import *
+from data import fetch_dataset, split_dataset
+from metrics import Metric
+from utils import save, load, to_device, process_control_name
+from logger import Logger
 
 device = config.PARAM['device']
 
-# def collate(input):
-    # for k in input:
-        # input[k] = torch.stack(input[k],0)
-    # return input
+def collate(input):
+    for k in input:
+        input[k] = torch.stack(input[k],0)
+    return input
 
 # if __name__ == '__main__':
     # batch_size = 2
@@ -173,3 +173,85 @@ device = config.PARAM['device']
     # print(y_2[:,:,0,0])
     # r = torch.eq(y_1,y_2)
     # print(r[:,:,0,0])
+    
+# if __name__ == '__main__':
+    # batch_size = 2
+    # dataset = fetch_dataset('Flickr30k')
+    # train_loader = torch.utils.data.DataLoader(dataset=dataset['train'], batch_size=batch_size, pin_memory=True, shuffle=True, num_workers=0, collate_fn=input_collate)
+    # print(len(dataset['train']))
+    # print(len(dataset['test']))   
+    # for i, input in enumerate(train_loader):
+        # input = collate(input)
+        # input = dict_to_device(input,device)
+        # print(input['img'].size())
+        # exit()
+
+# if __name__ == '__main__':
+    # m = nn.Sequential(
+			# nn.ZeroPad2d((0, 0, 0, 0)),
+			# nn.Conv2d(in_channels=3, out_channels=3, kernel_size=3, stride=1, padding=1)
+		# )
+    # #m = nn.Conv2d(3, 64, kernel_size=5, stride=2, padding=2)
+    # #m = nn.ConvTranspose2d(3, 64, kernel_size=5, stride=2, padding=2)
+    # #m = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+    # x = torch.randn(1, 3, 128, 128)
+    # x = m(x)
+    # print(x.size())
+    # x = m(x)
+    # print(x.size())
+    #m = nn.ConvTranspose2d(32, 32, kernel_size=3, stride=2, padding=1, output_padding=1)
+    #x = m(x)
+    # print(x.size())
+    # x = m(x)
+    # print(x.size())
+
+# if __name__ == '__main__':
+    # m_1 = Cell({'cell':'PixelShuffleCell','mode':'down','scale_factor':2,'groups':1})
+    # m_3 = Cell({'cell':'PixelShuffleCell','mode':'down','scale_factor':2,'groups':3})
+    # input = torch.randn(1,32*3,128,128)
+    # output_1 = m_1(input)
+    # output_3 = m_3(input)
+    # print(torch.eq(output_1,output_3).all())
+    
+    
+# if __name__ == '__main__':
+    # batch_size = 2
+    # dataset = fetch_dataset('Kodak_patch')
+    # train_loader = torch.utils.data.DataLoader(dataset=dataset['train'], batch_size=batch_size, pin_memory=True, shuffle=True, num_workers=0, collate_fn=input_collate)
+    # print(len(dataset['train']))
+    # print(len(dataset['test']))
+    # m = Cell({'cell':'PixelShuffleCell','mode':'down','scale_factor':2})
+    # for i, input in enumerate(train_loader):
+        # input = collate(input)
+        # input = dict_to_device(input,device)
+        # output = input['img']
+        # save_img(input['img'],'./output/img/image.png')
+        # for j in range(3):
+            # output = m(output)
+            # save_img(output,'./output/img/image_shuffled_{}.png'.format(j))
+        # exit()
+        
+        
+# if __name__ == '__main__':
+#     from torch.utils.tensorboard import SummaryWriter
+#     import numpy as np
+#
+#     writer = SummaryWriter()
+#
+#     for n_iter in range(100):
+#         writer.add_scalar('Loss/train', np.random.random(), n_iter)
+#         writer.add_scalar('Loss/test', np.random.random(), n_iter)
+#         writer.add_scalar('Accuracy/train', np.random.random(), n_iter)
+#         writer.add_scalar('Accuracy/test', np.random.random(), n_iter)
+
+# if __name__ == '__main__':
+#     from torch.utils.tensorboard import SummaryWriter
+#
+#     writer = SummaryWriter('runs/test')
+#     for n_iter in range(100):
+#         t = datetime.timedelta(seconds = n_iter*10)
+#         writer.add_text('time', str(t), n_iter)
+#     for n_iter in range(100):
+#         t = datetime.timedelta(seconds = n_iter*10)
+#         writer.add_text('time', str(t), n_iter)
+#     writer.close()
