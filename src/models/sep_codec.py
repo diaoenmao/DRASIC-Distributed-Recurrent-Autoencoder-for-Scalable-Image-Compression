@@ -39,25 +39,27 @@ class Model(nn.Module):
         reconstructed = x.new_zeros(x.size())
         indices = torch.arange(input['img'].size(0),device=config.PARAM['device'])
         for i in range(config.PARAM['num_iter']):
-            encoded = []
+            code = []
+            decoded = []
             node_indices = []
             for j in range(config.PARAM['num_node']):
                 node_x = x[input['label'] == j]
                 if node_x.size(0) == 0:
                     continue
-                encoded.append(self.model['encoder'][j](node_x))
+                encoded = self.model['encoder'][j](node_x)
+                e_code = self.model['quantizer'](encoded)
+                code.append(self.pack(e_code))
+                decoded.append(self.model['decoder'][j](e_code))
+                decoded[-1] = (decoded[-1] + 1) / 2 if i == 0 else decoded[-1]
                 node_indices.append(indices[input['label'] == j])
-            encoded = torch.cat(encoded, dim=0)
+            output['code'].append(np.concatenate(code, axis=0))
+            decoded = torch.cat(decoded, dim=0)
             node_indices = torch.cat(node_indices, dim=0)
-            encoded[node_indices] = encoded
-            code = self.model['quantizer'](encoded)
-            output['code'].append(self.pack(code))
-            decoded = self.model['decoder'](code)
-            decoded = (decoded + 1) / 2 if i == 0 else decoded
+            decoded[node_indices] = decoded
             reconstructed = reconstructed + decoded
             output['loss'] = output['loss'] + self.loss_fn(reconstructed, input['img'])
-            x = input['img'] - reconstructed
-            output['img'].append(reconstructed)
+            x = input['img'] - reconstructed.detach()
+            output['img'].append(reconstructed.detach())
         output['loss'] = output['loss'] / config.PARAM['num_iter']
         for i in range(1,config.PARAM['num_iter']):
             output['code'][i] = np.concatenate((output['code'][i-1], output['code'][i]), axis=1)
@@ -65,11 +67,11 @@ class Model(nn.Module):
         return output
 
 
-def dist_codec():
+def sep_codec():
     config.PARAM['model'] = {}
     config.PARAM['model']['encoder'] = [
         ({'cell': 'ConvCell', 'input_size': config.PARAM['num_channel'], 'output_size': 32, 'kernel_size': 1,
-         'stride': 1, 'padding': 0, 'bias': True, 'activation': config.PARAM['activation'],
+         'stride': 1, 'padding': 0, 'bias': False, 'activation': config.PARAM['activation'],
          'normalization': config.PARAM['normalization']},
         {'cell': 'PixelShuffleCell', 'mode': 'down', 'scale_factor': 2},
         {'cell': 'ConvLSTMCell', 'input_size': 128, 'output_size': 128, 'kernel_size': 3, 'stride': 1,
@@ -85,8 +87,8 @@ def dist_codec():
          'normalization': config.PARAM['normalization']},)
     ] * config.PARAM['num_node']
     config.PARAM['model']['quantizer'] = {'cell': 'QuantizationCell'}
-    config.PARAM['model']['decoder'] = (
-        {'cell': 'ConvCell', 'input_size': config.PARAM['code_size'], 'output_size': 128, 'kernel_size': 1,
+    config.PARAM['model']['decoder'] = [
+        ({'cell': 'ConvCell', 'input_size': config.PARAM['code_size'], 'output_size': 128, 'kernel_size': 1,
          'stride': 1, 'padding': 0, 'bias': False, 'activation': config.PARAM['activation'],
          'normalization': config.PARAM['normalization']},
         {'cell': 'ConvLSTMCell', 'input_size': 128, 'output_size': 512, 'kernel_size': 3, 'stride': 1,
@@ -100,7 +102,7 @@ def dist_codec():
         {'cell': 'PixelShuffleCell', 'mode': 'up', 'scale_factor': 2},
         {'cell': 'ConvCell', 'input_size': 32, 'output_size': config.PARAM['num_channel'], 'kernel_size': 1,
          'stride': 1, 'padding': 0, 'bias': False, 'activation': config.PARAM['activation'],
-         'normalization': config.PARAM['normalization']}
-    )
+         'normalization': config.PARAM['normalization']},)
+    ] * config.PARAM['num_node']
     model = Model()
     return model

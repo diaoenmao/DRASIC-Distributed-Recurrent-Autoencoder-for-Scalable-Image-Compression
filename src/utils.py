@@ -110,6 +110,7 @@ def process_control_name():
     control_name = config.PARAM['control_name'].split('_')
     config.PARAM['num_iter'] = int(control_name[0])
     config.PARAM['code_size'] = int(control_name[1])
+    config.PARAM['num_node'] = int(control_name[2])
     config.PARAM['num_channel'] = 1 if config.PARAM['data_name']['train'] == 'MNIST' else 3
     print(config.PARAM)
     return

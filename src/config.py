@@ -1,9 +1,9 @@
 def init():
     global PARAM
     PARAM = {
-        'data_name': {'train':'CIFAR10','test':'CIFAR10'},
-        'model_name': 'codec',
-        'control_name': '16_8',
+        'data_name': {'train':'MNIST','test':'MNIST'},
+        'model_name': 'sep_codec',
+        'control_name': '16_8_10',
         'optimizer_name': 'Adam',
         'lr': 1e-3,
         'momentum': 0,
@@ -14,7 +14,7 @@ def init():
         'patience': 5,
         'threshold': 1e-3,
         'factor': 0.1,
-        'batch_size': {'train': 100, 'test': 200},
+        'batch_size': {'train': 10, 'test': 200},
         'shuffle': {'train': True, 'test': False},
         'num_workers': 0,
         'data_size': {'train': 0, 'test': 0},
