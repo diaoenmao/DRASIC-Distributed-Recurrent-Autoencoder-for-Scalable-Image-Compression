@@ -16,11 +16,11 @@ This is an implementation of [DRASIC: Distributed Recurrent Autoencoder for Scal
 
 ![half_class_band](/img/full_class_band.png)
 
-- Rate-distortion curves for data sources distributed by random subsets with $T=16$ for the first half of sources and $T=8$ for the second half of sources.
+- Rate-distortion curves for data sources distributed by random subsets with T=16 for the first half of sources and $T=8$ for the second half of sources.
 
 ![half_class_band](/img/half_subset_band.png)
 
-- Rate-distortion curves for data sources distributed by class labels with $T=16$ for the first half of sources and $T=8$ for the second half of sources.
+- Rate-distortion curves for data sources distributed by class labels with T=16 for the first half of sources and $T=8$ for the second half of sources.
 
 ![half_class_band](/img/half_class_band.png)
 
