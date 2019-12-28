@@ -1,39 +1,33 @@
+import anytree
 import numpy as np
 import os
 import pickle
 import torch
 from PIL import Image
 from torch.utils.data import Dataset
-from utils import makedir_exist_ok, save, load
-from .utils import download_url, extract_file, make_classes_counts
+from utils import check_exists, makedir_exist_ok, save, load
+from .utils import download_url, extract_file, make_classes_counts, make_tree, make_flat_index
 
 
 class CIFAR10(Dataset):
     data_name = 'CIFAR10'
-    url = "https://www.cs.toronto.edu/~kriz/cifar-10-python.tar.gz"
-    md5 = 'c58f30108f718f92721af3b95e74349a'
-    base_folder = 'cifar-10-batches-py'
-    meta = {'filename': 'batches.meta', 'key': 'label_names'}
-    train_list = ['data_batch_1', 'data_batch_2', 'data_batch_3', 'data_batch_4', 'data_batch_5']
-    test_list = ['test_batch']
-    feature_dim = {'img': 1}
+    file = [('https://www.cs.toronto.edu/~kriz/cifar-10-python.tar.gz', 'c58f30108f718f92721af3b95e74349a')]
 
-    def __init__(self, root, split, transform=None, download=False):
+    def __init__(self, root, split, subset, transform=None):
         self.root = os.path.expanduser(root)
         self.split = split
+        self.subset = subset
         self.transform = transform
-        if download:
-            self.download()
-        if not self._check_exists():
-            raise RuntimeError('Dataset not found. You can use download=True to download it')
-        self.img, self.label = load(os.path.join(self.processed_folder, '{}.pt'.format(split)))
-        self.classes_to_labels = load(os.path.join(self.processed_folder, 'meta.pt'))
-        self.classes = self.classes_to_labels.keys()
-        self.classes_size = len(self.classes)
-        self.classes_counts = make_classes_counts(self.label)
+        if not check_exists(self.processed_folder):
+            self.process()
+        self.img, self.target = load(os.path.join(self.processed_folder, '{}.pt'.format(self.split)))
+        self.classes_to_labels, self.classes_size = load(os.path.join(self.processed_folder, 'meta.pt'))
+        self.classes_to_labels, self.classes_size = self.classes_to_labels[self.subset], self.classes_size[self.subset]
+        self.classes_counts = make_classes_counts(self.target[self.subset])
 
     def __getitem__(self, index):
-        input = {'img': Image.fromarray(self.img[index]), 'label': torch.tensor(self.label[index])}
+        img, target = Image.fromarray(self.img[index]), {s: torch.tensor(self.target[s][index]) for s in self.target}
+        input = {'img': img, **target}
         if self.transform is not None:
             input = self.transform(input)
         return input
@@ -49,66 +43,66 @@ class CIFAR10(Dataset):
     def raw_folder(self):
         return os.path.join(self.root, 'raw')
 
-    def _check_exists(self):
-        return os.path.exists(self.processed_folder)
-
-    def download(self):
-        if self._check_exists():
-            return
-        makedir_exist_ok(self.raw_folder)
-        filename = os.path.basename(self.url)
-        file_path = os.path.join(self.raw_folder, filename)
-        extracted_file_path = os.path.join(self.raw_folder, self.base_folder)
-        download_url(self.url, root=self.raw_folder, filename=filename, md5=self.md5)
-        extract_file(file_path)
-        train_set = read_pickle_file(extracted_file_path, self.train_list)
-        test_set = read_pickle_file(extracted_file_path, self.test_list)
+    def process(self):
+        if not check_exists(self.raw_folder):
+            self.download()
+        train_set, test_set, meta = self.make_data()
         save(train_set, os.path.join(self.processed_folder, 'train.pt'))
         save(test_set, os.path.join(self.processed_folder, 'test.pt'))
-        classes_to_labels = parse_meta(os.path.join(self.raw_folder, self.base_folder, self.meta['filename']), self.meta['key'])
-        save(classes_to_labels, os.path.join(self.processed_folder, 'meta.pt'))
+        save(meta, os.path.join(self.processed_folder, 'meta.pt'))
+        return
+
+    def download(self):
+        makedir_exist_ok(self.raw_folder)
+        for (url, md5) in self.file:
+            filename = os.path.basename(url)
+            download_url(url, self.raw_folder, filename, md5)
+            extract_file(os.path.join(self.raw_folder, filename))
         return
 
     def __repr__(self):
-        fmt_str = 'Dataset {}\n'.format(self.__class__.__name__)
-        fmt_str += '    Number of data points: {}\n'.format(self.__len__())
-        fmt_str += '    Split: {}\n'.format(self.split)
-        fmt_str += '    Root: {}\n'.format(self.root)
-        fmt_str += '    Transforms: {}\n'.format(self.transform.__repr__())
+        fmt_str = 'Dataset {}\nSize: {}\nRoot: {}\nSplit: {}\nSubset: {}\nTransforms: {}'.format(
+            self.__class__.__name__, self.__len__(), self.root, self.split, self.subset, self.transform.__repr__())
         return fmt_str
+
+    def make_data(self):
+        train_filenames = ['data_batch_1', 'data_batch_2', 'data_batch_3', 'data_batch_4', 'data_batch_5']
+        test_filenames = ['test_batch']
+        train_img, train_label = read_pickle_file(os.path.join(self.raw_folder, 'cifar-10-batches-py'), train_filenames)
+        test_img, test_label = read_pickle_file(os.path.join(self.raw_folder, 'cifar-10-batches-py'), test_filenames)
+        train_target, test_target = {'label': train_label}, {'label': test_label}
+        with open(os.path.join(self.raw_folder, 'cifar-10-batches-py', 'batches.meta'), 'rb') as f:
+            data = pickle.load(f, encoding='latin1')
+            classes = data['label_names']
+        classes_to_labels = {'label': anytree.Node('U', index=[])}
+        for c in classes:
+            make_tree(classes_to_labels['label'], [c])
+        classes_size = {'label': make_flat_index(classes_to_labels['label'])}
+        return (train_img, train_target), (test_img, test_target), (classes_to_labels, classes_size)
 
 
 class CIFAR100(CIFAR10):
     data_name = 'CIFAR100'
-    url = "https://www.cs.toronto.edu/~kriz/cifar-100-python.tar.gz"
-    md5 = 'eb9058c3a382ffc7106e4002c42a8d85'
-    meta = {'filename': 'meta', 'key': 'fine_label_names'}
-    base_folder = 'cifar-100-python'
-    train_list = ['train']
-    test_list = ['test']
+    file = [('https://www.cs.toronto.edu/~kriz/cifar-100-python.tar.gz', 'eb9058c3a382ffc7106e4002c42a8d85')]
 
-    def __init__(self, root, split, **kwargs):
-        super(CIFAR100, self).__init__(root, split, **kwargs)
-
-    @property
-    def processed_folder(self):
-        return os.path.join(self.root, 'processed')
-
-    def download(self):
-        if self._check_exists():
-            return
-        filename = os.path.basename(self.url)
-        file_path = os.path.join(self.raw_folder, filename)
-        extracted_file_path = os.path.join(self.raw_folder, self.base_folder)
-        download_url(self.url, root=self.raw_folder, filename=filename, md5=self.md5)
-        extract_file(file_path)
-        train_set = read_pickle_file(extracted_file_path, self.train_list)
-        test_set = read_pickle_file(extracted_file_path, self.test_list)
-        save(train_set, os.path.join(self.processed_folder, 'train.pt'))
-        save(test_set, os.path.join(self.processed_folder, 'test.pt'))
-        classes_to_labels = parse_meta(os.path.join(self.raw_folder, self.base_folder, self.meta['filename']), self.meta['key'])
-        save(classes_to_labels, os.path.join(self.processed_folder, 'meta.pt'))
-        return
+    def make_data(self):
+        train_filenames = ['train']
+        test_filenames = ['test']
+        train_img, train_label = read_pickle_file(os.path.join(self.raw_folder, 'cifar-100-python'), train_filenames)
+        test_img, test_label = read_pickle_file(os.path.join(self.raw_folder, 'cifar-100-python'), test_filenames)
+        train_target, test_target = {'label': train_label}, {'label': test_label}
+        with open(os.path.join(self.raw_folder, 'cifar-100-python', 'meta'), 'rb') as f:
+            data = pickle.load(f, encoding='latin1')
+            classes = data['fine_label_names']
+        classes_to_labels = {'label': anytree.Node('U', index=[])}
+        for c in classes:
+            for k in CIFAR100_classes:
+                if c in CIFAR100_classes[k]:
+                    c = [k, c]
+                    break
+            make_tree(classes_to_labels['label'], c)
+        classes_size = {'label': make_flat_index(classes_to_labels['label'], classes)}
+        return (train_img, train_target), (test_img, test_target), (classes_to_labels, classes_size)
 
 
 def read_pickle_file(path, filenames):
@@ -124,15 +118,7 @@ def read_pickle_file(path, filenames):
     return img, label
 
 
-def parse_meta(path, key):
-    with open(path, 'rb') as f:
-        data = pickle.load(f, encoding='latin1')
-        classes = data[key]
-    classes_to_labels = {classes[i]: i for i in range(len(classes))}
-    return classes_to_labels
-
-
-_classes = {
+CIFAR100_classes = {
     'aquatic mammals': ['beaver', 'dolphin', 'otter', 'seal', 'whale'],
     'fish': ['aquarium_fish', 'flatfish', 'ray', 'shark', 'trout'],
     'flowers': ['orchid', 'poppy', 'rose', 'sunflower', 'tulip'],

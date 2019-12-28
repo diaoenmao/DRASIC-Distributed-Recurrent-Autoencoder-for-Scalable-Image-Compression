@@ -1,9 +1,10 @@
 def init():
     global PARAM
     PARAM = {
-        'data_name': {'train':'MNIST','test':'MNIST'},
-        'model_name': 'sep_codec',
-        'control_name': '16_8_10',
+        'data_name': 'MNIST',
+        'subset': 'label',
+        'model_name': 'dist_codec',
+        'control': {'normalization': 'none', 'activation': 'tanh', 'num_iter':'16', 'code_size':'8', 'num_node':'10'},
         'optimizer_name': 'Adam',
         'lr': 1e-3,
         'momentum': 0,
@@ -26,8 +27,7 @@ def init():
         'init_seed': 0,
         'num_Experiments': 1,
         'log_interval': 0.25,
+        'log_overwrite': False,
         'loss_fn': 'mae',
-        'normalization': 'none',
-        'activation': 'tanh',
         'resume_mode': 0
     }

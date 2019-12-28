@@ -9,56 +9,48 @@ from torch.utils.data.dataloader import default_collate
 from utils import save, load
 
 
-def fetch_dataset(data_name):
+def fetch_dataset(data_name, subset):
     dataset = {}
     print('fetching data {}...'.format(data_name))
-    data_name_head = data_name.split('_')[0]
-    root = './data/{}'.format(data_name_head)
-    if data_name_head in ['MNIST', 'FashionMNIST', 'SVHN']:
-        dataset['train'] = eval('datasets.{}(root=root, split=\'train\', download=True, transform=datasets.Compose(['
-                                'transforms.ToTensor()]))'.format(data_name_head))
-        dataset['test'] = eval('datasets.{}(root=root, split=\'test\', download=True, transform=datasets.Compose(['
-                               'transforms.ToTensor()]))'.format(data_name_head))
-        config.PARAM['stats'] = make_stats(dataset['train'], batch_size=config.PARAM['batch_size']['test'])
+    root = './data/{}'.format(data_name)
+    if data_name in ['MNIST', 'FashionMNIST', 'SVHN']:
+        dataset['train'] = eval('datasets.{}(root=root, split=\'train\', subset=subset,'
+                                'transform=datasets.Compose([''transforms.ToTensor()]))'.format(data_name))
+        dataset['test'] = eval('datasets.{}(root=root, split=\'test\', subset=subset,'
+                               'transform=datasets.Compose([transforms.ToTensor()]))'.format(data_name))
         config.PARAM['transform'] = {
             'train': datasets.Compose([transforms.Resize((32, 32)), transforms.ToTensor()]),
             'test': datasets.Compose([transforms.Resize((32, 32)), transforms.ToTensor()])
         }
-    elif data_name_head == 'EMNIST':
-        subset = data_name.split('_')[1]
-        dataset['train'] = datasets.EMNIST(root=root, split='train_{}'.format(subset), download=True,
+    elif data_name == 'EMNIST':
+        dataset['train'] = datasets.EMNIST(root=root, split='train', subset=subset,
                                            transform=datasets.Compose([transforms.ToTensor()]))
-        dataset['test'] = datasets.EMNIST(root=root, split='test_{}'.format(subset), download=True,
+        dataset['test'] = datasets.EMNIST(root=root, split='test', subset=subset,
                                           transform=datasets.Compose([transforms.ToTensor()]))
-        config.PARAM['stats'] = make_stats(dataset['train'], batch_size=config.PARAM['batch_size']['test'])
         config.PARAM['transform'] = {
-            'train': datasets.Compose([transforms.Resize((32, 32)), transforms.ToTensor()]),
-            'test': datasets.Compose([transforms.Resize((32, 32)), transforms.ToTensor()])
+            'train': datasets.Compose([transforms.ToTensor()]), 'test': datasets.Compose([transforms.ToTensor()])
         }
-    elif data_name_head in ['CIFAR10', 'CIFAR100']:
-        dataset['train'] = eval('datasets.{}(root=root, split=\'train\', download=True, transform=datasets.Compose(['
-                                'transforms.ToTensor()]))'.format(data_name_head))
-        dataset['test'] = eval('datasets.{}(root=root, split=\'test\', download=True, transform=datasets.Compose(['
-                               'transforms.ToTensor()]))'.format(data_name_head))
-        config.PARAM['stats'] = make_stats(dataset['train'], batch_size=config.PARAM['batch_size']['test'])
+    elif data_name in ['CIFAR10', 'CIFAR100']:
+        dataset['train'] = eval('datasets.{}(root=root, split=\'train\', subset=subset,'
+                                'transform=datasets.Compose([''transforms.ToTensor()]))'.format(data_name))
+        dataset['test'] = eval('datasets.{}(root=root, split=\'test\', subset=subset,'
+                               'transform=datasets.Compose([transforms.ToTensor()]))'.format(data_name))
         config.PARAM['transform'] = {
             'train': datasets.Compose([transforms.ToTensor()]),
             'test': datasets.Compose([transforms.ToTensor()])
         }
-    elif data_name_head == 'ImageNet':
-        dataset['train'] = datasets.ImageNet(root, split='train', download=True,
+    elif data_name == 'ImageNet':
+        dataset['train'] = datasets.ImageNet(root, split='train', subset=subset,
                                              transform=datasets.Compose([transforms.ToTensor()]))
-        dataset['test'] = datasets.ImageNet(root, split='test', download=True,
+        dataset['test'] = datasets.ImageNet(root, split='test', subset=subset,
                                             transform=datasets.Compose([transforms.ToTensor()]))
-        config.PARAM['stats'] = make_stats(dataset['train'], batch_size=config.PARAM['batch_size']['test'])
         config.PARAM['transform'] = {
             'train': datasets.Compose([transforms.Resize((224, 224)), transforms.ToTensor()]),
             'test': datasets.Compose([transforms.Resize((224, 224)), transforms.ToTensor()])
         }
-    elif data_name_head == 'Kodak':
+    elif data_name == 'Kodak':
         dataset['train'] = datasets.ImageFolder(root, transform=datasets.Compose([transforms.ToTensor()]))
         dataset['test'] = datasets.ImageFolder(root, transform=datasets.Compose([transforms.ToTensor()]))
-        config.PARAM['stats'] = make_stats(dataset['train'], batch_size=config.PARAM['batch_size']['test'])
         config.PARAM['transform'] = {
             'train': datasets.Compose([transforms.ToTensor()]), 'test': datasets.Compose([transforms.ToTensor()])
         }
@@ -68,6 +60,7 @@ def fetch_dataset(data_name):
     dataset['test'].transform = config.PARAM['transform']['test']
     print('data ready')
     return dataset
+
 
 
 def input_collate(batch):
@@ -81,18 +74,12 @@ def input_collate(batch):
         return default_collate(batch)
 
 
-def split_dataset(dataset, data_size, batch_size, radomGen=np.random.RandomState(1234), collate_fn=input_collate):
+def make_data_loader(dataset):
     data_loader = {}
     for k in dataset:
-        if k in data_size:
-            data_size[k] = len(dataset[k]) if (data_size[k] > len(dataset[k])) else data_size[k]
-            data_size[k] = len(dataset[k]) if (data_size[k] == 0) else data_size[k]
-            batch_size[k] = data_size[k] if (batch_size[k] == 0) else batch_size[k]
-            data_idx_k = radomGen.choice(list(range(len(dataset[k]))), size=data_size[k], replace=False)
-            dataset_k = torch.utils.data.Subset(dataset[k], data_idx_k)
-            data_loader[k] = torch.utils.data.DataLoader(dataset=dataset_k, shuffle=config.PARAM['shuffle'][k],
-                                                         batch_size=batch_size[k], pin_memory=True,
-                                                         num_workers=config.PARAM['num_workers'], collate_fn=collate_fn)
+        data_loader[k] = torch.utils.data.DataLoader(dataset=dataset[k], shuffle=config.PARAM['shuffle'][k],
+                                                     batch_size=config.PARAM['batch_size'][k], pin_memory=True,
+                                                     num_workers=config.PARAM['num_workers'], collate_fn=input_collate)
     return data_loader
 
 

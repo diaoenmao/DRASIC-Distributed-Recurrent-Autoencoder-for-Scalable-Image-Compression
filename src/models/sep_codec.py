@@ -3,7 +3,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from utils import makedir_exist_ok, apply_fn
+from utils import apply_fn
 from .utils import make_model
 
 
@@ -11,7 +11,6 @@ class Model(nn.Module):
     def __init__(self):
         super(Model, self).__init__()
         self.model = make_model(config.PARAM['model'])
-        makedir_exist_ok('./output/tmp')
 
     def pack(self, code):
         code = np.packbits(code.detach().cpu().numpy().astype(np.int8)).reshape(-1, 1)
