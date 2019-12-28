@@ -1,8 +1,11 @@
 # Distributed Recurrent Autoencoder for Scalable Image Compression
 This is an implementation of [DRASIC: Distributed Recurrent Autoencoder for Scalable Image Compression](https://arxiv.org/abs/1903.09887)
-![slepianwolf](/img/slepianwolf.png)
-![deepdsc](/img/deepdsc.png)
-![deepencoderdecoder](/img/deepencoderdecoder.png)
+- Slepian-Wolf Achievable Region
+<img src="/img/slepianwolf.png" width="331" height="304">
+
+- Deep Scalable Distributed Source Coding
+<img src="/img/deepdsc.png" width="527" height="249">
+<img src="/img/deepencoderdecoder.png">
 
 ## Requirements
  - Python 3
