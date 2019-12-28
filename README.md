@@ -26,5 +26,5 @@ This is an implementation of [DRASIC: Distributed Recurrent Autoencoder for Scal
 
 ## Acknowledgement
 *Enmao Diao  
-Jie Ding
+Jie Ding  
 Vahid Tarokh*
