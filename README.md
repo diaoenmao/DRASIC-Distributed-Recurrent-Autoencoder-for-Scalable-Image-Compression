@@ -1,7 +1,8 @@
 # Distributed Recurrent Autoencoder for Scalable Image Compression
 This is an implementation of [DRASIC: Distributed Recurrent Autoencoder for Scalable Image Compression](https://arxiv.org/abs/1903.09887)
-![DeepDSC](/img/DeepDSC.png)
-![DeepEncoderDecoder](/img/DeepEncoderDecoder.png)
+![slepianwolf](/img/slepianwolf.png)
+![deepdsc](/img/deepdsc.png)
+![deepencoderdecoder](/img/deepencoderdecoder.png)
 
 ## Requirements
  - Python 3
