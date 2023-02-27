@@ -1,5 +1,5 @@
 # DRASIC: Distributed Recurrent Autoencoder for Scalable Image Compression
-This is an implementation of [DRASIC: Distributed Recurrent Autoencoder for Scalable Image Compression](https://arxiv.org/abs/1903.09887)
+[DCC 2020] This is an implementation of [DRASIC: Distributed Recurrent Autoencoder for Scalable Image Compression](https://arxiv.org/abs/1903.09887)
 - Slepian-Wolf Achievable Region
 <img src="/img/slepianwolf.png" width="331" height="304">
 
